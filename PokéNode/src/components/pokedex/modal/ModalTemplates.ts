@@ -1,12 +1,14 @@
-import type { Pokemon, ImageMode, EvolutionNode, Language } from '../../../types/model';
+import type { Pokemon, ImageMode, EvolutionNode, Language, Stats } from '../../../types/model';
 import { MediaHandler } from '../../../utils/MediaHandler';
 import { TypeCalculator } from '../../../utils/TypeCalculator';
 import { I18n } from '../../../services/I18n';
 
 export const ModalTemplates = {
 
+    // #region STRUCTURE GLOBALE (COQUILLE)
+    // ============================================================================
     getBaseHTML(currentLang: string, currentMode: string): string {
-        return `
+        return /*html*/ `
             <div id="pokemon-modal" class="modal-overlay" style="display: none;">
                 <button id="prev-pokemon" class="modal-nav-btn prev">❮</button>
                 <button id="next-pokemon" class="modal-nav-btn next">❯</button>
@@ -40,7 +42,10 @@ export const ModalTemplates = {
             </div>
         `;
     },
+    // #endregion
 
+    // #region CONTENU DU POKÉMON (BODY)
+    // ============================================================================
     getPokemonContentHTML(pokemon: Pokemon, mode: ImageMode, lang: Language, evoChain: EvolutionNode | null): string {
         const name = lang === 'fr' ? pokemon.name.fr : pokemon.name.en;
         const desc = lang === 'fr' ? pokemon.description.fr : pokemon.description.en;
@@ -52,7 +57,7 @@ export const ModalTemplates = {
         const pixelClass = mode === 'legacy' ? 'pixelated' : '';
         const shadowStyle = "box-shadow: 0 4px 15px rgba(0,0,0,0.2);";
 
-        return `
+        return /*html*/ `
             <div class="modal-layout">
                 <div class="modal-visual">
                     <div class="polaroid-frame sway-active" style="width: 240px; min-height: 280px; padding: 10px; display: flex; flex-direction: column; align-items: center; background: white; ${shadowStyle}">
@@ -78,16 +83,16 @@ export const ModalTemplates = {
                     <div id="modal-efficacies" class="efficacy-compact-container">
                         <div class="eff-group-compact">
                             <div class="eff-header"><span class="eff-title">${I18n.t('weaknesses')}</span></div>
-                            <div id="modal-weak-list" class="eff-list-compact">Loading...</div>
+                            <div id="modal-weak-list" class="eff-list-compact">${I18n.t('loading')}...</div>
                         </div>
                         <div class="eff-group-compact">
                             <div class="eff-header"><span class="eff-title">${I18n.t('resistances')}</span></div>
-                            <div id="modal-resist-list" class="eff-list-compact">Loading...</div>
+                            <div id="modal-resist-list" class="eff-list-compact">${I18n.t('loading')}...</div>
                         </div>
                     </div>
                 </div>
 
-                <div class="modal-infos">
+                <div class="modal-infos" style="margin-top: 1rem;">
                     <div class="modal-header"><h2 id="modal-title-name">${name}</h2></div>
                     
                     <div class="modal-types" style="display:flex; align-items:center; flex-wrap:wrap; gap:10px; margin-top:10px;">
@@ -116,28 +121,38 @@ export const ModalTemplates = {
                         <h3>${I18n.t('evolutions')}</h3>
                         <div id="modal-evo-content">
                             ${evoChain ?
-            `<div class="evo-tree-container" style="display:flex; justify-content:center; overflow-x:auto; padding:10px;">${this.buildEvolutionHTML(evoChain, mode)}</div>`
-            : `<div class="evo-loading" style="min-height: 100px; display: flex; align-items: center; justify-content: center;">${I18n.t('loading')}...</div>`}
+                                /*html*/ `<div class="evo-tree-container" style="display:flex; justify-content:center; overflow-x:auto; padding:10px;">${this.buildEvolutionHTML(evoChain, mode)}</div>`
+                                : `<div class="evo-loading" style="min-height: 100px; display: flex; align-items: center; justify-content: center;">${I18n.t('loading')}...</div>`}
                         </div>
                     </div>
                 </div>
             </div>
         `;
     },
+    // #endregion
 
-    generateStatsHTML(stats: any): string {
+    // #region SOUS-COMPOSANTS (STATS, ÉVOLUTIONS, TYPES)
+    // ============================================================================
+    
+    /**
+     * Génère les barres de progression pour les statistiques.
+     * Attend l'objet Stats structuré du modèle (hp, attack, etc.).
+     */
+    generateStatsHTML(stats: Stats): string {
         if (!stats) return '';
-        const entries = Array.isArray(stats) ? stats.map(s => [s.stat.name, s.base_stat]) : Object.entries(stats);
-
-        return entries.map(([key, value]) => {
+        
+        // On transforme l'objet { hp: 50, attack: 100 } en tableau de paires [['hp', 50], ['attack', 100]]
+        return Object.entries(stats).map(([key, value]) => {
             const val = Number(value);
+            // Calcul du pourcentage (basé sur 150 comme max arbitraire pour l'UI)
             const percent = Math.min(100, (val / 150) * 100);
 
-            let color = '#4caf50';
-            if (val < 50) color = '#ff5252';
-            else if (val < 90) color = '#fb8c00';
+            // Code couleur dynamique
+            let color = '#4caf50'; // Vert (Bon)
+            if (val < 50) color = '#ff5252'; // Rouge (Faible)
+            else if (val < 90) color = '#fb8c00'; // Orange (Moyen)
 
-            return `
+            return /*html*/ `
             <div class="stat-row">
                 <span class="stat-name">${I18n.translateStat(key)}</span>
                 <div class="stat-bar-bg"><div class="stat-bar-fill" style="width:${percent}%; background-color:${color};"></div></div>
@@ -146,14 +161,18 @@ export const ModalTemplates = {
         }).join('');
     },
 
+    /**
+     * Génère l'arbre d'évolution récursif.
+     */
     buildEvolutionHTML(node: EvolutionNode, mode: ImageMode): string {
+        // On crée un faux objet Pokemon minimal juste pour utiliser le MediaHandler
         const tempP = { id: node.id } as Pokemon;
         const imgUrl = MediaHandler.getModalImage(tempP, mode);
         const placeholder = MediaHandler.getPlaceholder(mode);
         const pixelClass = mode === 'legacy' ? 'pixelated' : '';
 
-        // 1. Le noeud parent (ex: Evoli)
-        let html = `
+        // Le noeud parent (ex: Evoli)
+        let html = /*html*/ `
             <div class="evo-node clickable-evo" data-id="${node.id}" style="display:flex; flex-direction:column; align-items:center; margin: 5px;">
                 <div style="width: 60px; height: 60px; display: flex; align-items: center; justify-content: center; background:white; border-radius:50%;">
                     <img src="${imgUrl}" width="60" height="60" class="evo-img ${pixelClass}" style="object-fit: contain; width:100%; height:100%;" onerror="this.onerror=null; this.src='${placeholder}';">
@@ -162,44 +181,40 @@ export const ModalTemplates = {
             </div>
         `;
 
-        // 2. Les enfants (ex: Pyroli, Voltali, etc.)
+        // Les enfants (Récursif)
         if (node.evolvesTo?.length > 0) {
-            html += `<div class="evo-arrow" style="margin: 0 10px;"></div>`;
-
+            html += /*html*/ `<div class="evo-arrow" style="margin: 0 10px;"></div>`;
             const childrenHtml = node.evolvesTo.map(child => this.buildEvolutionHTML(child, mode)).join('');
 
-            html += `
+            html += /*html*/ `
                 <div style="display:flex; flex-wrap:wrap; justify-content:center; align-items:center; max-width: 300px;">
                     ${childrenHtml}
                 </div>
             `;
         }
 
-        // Conteneur global de ce groupe (Parent + Enfants)
-        return `<div class="evo-group" style="display:flex; align-items:center; flex-direction:row;">${html}</div>`;
+        return /*html*/ `<div class="evo-group" style="display:flex; align-items:center; flex-direction:row;">${html}</div>`;
     },
 
     /**
-     * Utilise le TypeCalculator pour générer les badges
+     * Utilise le TypeCalculator pour générer les badges de faiblesses/résistances.
      */
-    getEfficaciesHTML(relationsList: any[]): { weak: string, resist: string } {
-        // 1. Calcul via la classe utilitaire
-        const effectiveness = TypeCalculator.calculateFromApi(relationsList);
+    getEfficaciesHTML(types: string[]): { weak: string, resist: string } {
+        const effectiveness = TypeCalculator.getWeaknesses(types);
 
-        // 2. Fonction helper pour générer le HTML d'une liste de types
         const buildBadges = (list: { type: string, value: number }[]) => {
-            if (list.length === 0) return `<span class="empty-msg" style="opacity:0.6;">-</span>`;
+            if (list.length === 0) return /*html*/ `<span class="empty-msg" style="opacity:0.6;">-</span>`;
 
             return list.map(item => {
-                // Formatage de la valeur (x0.5 -> 1/2)
                 let valDisplay = `x${item.value}`;
+                if (item.value === 0.5) valDisplay = '1/2';
+                if (item.value === 0.25) valDisplay = '1/4';
 
-                // Classes spéciales CSS
                 let specialClass = '';
                 if (item.value >= 4) specialClass = 'is-super-weak';
                 if (item.value === 0) specialClass = 'is-immune';
 
-                return `
+                return /*html*/ `
                     <div class="eff-badge type-${item.type} ${specialClass}">
                         <span class="eff-name">${I18n.translateType(item.type)}</span>
                         <span class="eff-val">${valDisplay}</span>
@@ -208,10 +223,10 @@ export const ModalTemplates = {
             }).join('');
         };
 
-        // 3. Génération des deux colonnes
         return {
             weak: buildBadges(effectiveness.weak),
             resist: buildBadges([...effectiveness.immune, ...effectiveness.resist])
         };
     }
+    // #endregion
 };

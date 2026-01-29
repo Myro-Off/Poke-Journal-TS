@@ -2,77 +2,79 @@ import type { ImageMode, Language } from '../../types/model';
 
 export class AppHeader extends HTMLElement {
 
-    /* ==========================================================================
-       1. CONFIGURATION
-       ========================================================================== */
-
-    // @ts-ignore : Utilisé nativement par le navigateur
+    // #region CONFIGURATION & ÉTAT
+    // ============================================================================
     static get observedAttributes() {
         return ['lang', 'mode'];
     }
 
-    // Callback pour prévenir le Controller
+    private currentView: 'pokedex' | 'builder' = 'pokedex';
     public onSettingsChange?: (lang: Language, mode: ImageMode) => void;
+    // #endregion
 
-    /* ==========================================================================
-       2. CYCLE DE VIE
-       ========================================================================== */
-
-    // @ts-ignore
+    // #region CYCLE DE VIE
+    // ============================================================================
     connectedCallback() {
-        // On ne dessine le HTML que s'il est vide, afin d'éviter d'écraser les valeurs existantes
         if (!this.innerHTML.trim()) {
             this.render();
             this.attachEvents();
         }
-
-        // On synchronise les checkboxes avec les attributs actuels
         this.updateCheckboxesFromAttributes();
     }
 
-    /**
-     * Appelé quand on fait setAttribute('lang', 'en') depuis l'extérieur
-     */
-    // @ts-ignore
-    attributeChangedCallback(name: string, oldValue: string, newValue: string) {
-        // Optimisation : On ne fait rien si la valeur est la même
+    attributeChangedCallback(oldValue: string, newValue: string) {
         if (oldValue !== newValue) {
             this.updateCheckboxesFromAttributes();
         }
     }
+    // #endregion
 
-    /* ==========================================================================
-       3. INTERNE : MISE À JOUR VISUELLE
-       ========================================================================== */
+    // #region API PUBLIQUE (NAVIGATION)
+    // ============================================================================
+    public setViewMode(mode: 'pokedex' | 'builder') {
+        this.currentView = mode;
+        const btn = this.querySelector('#open-team-builder');
+        if (!btn) return;
 
-    /**
-     * Met à jour l'état visuel des inputs sans recharger tout le HTML.
-     * Pour éviter d'écraser les éléments injectés (Search/Filter).
-     */
+        const iconSpan = btn.querySelector('.icon');
+        const labelSpan = btn.querySelector('.label');
+
+        if (mode === 'pokedex') {
+            if (iconSpan) iconSpan.textContent = '📜';
+            if (labelSpan) labelSpan.textContent = 'Équipes';
+            btn.classList.remove('active-mode');
+            btn.setAttribute('title', 'Gérer mes équipes');
+        } else {
+            if (iconSpan) {
+                iconSpan.innerHTML = `<img src="https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/items/poke-ball.png" 
+                    style="width:20px; height:20px; vertical-align:middle; filter: drop-shadow(0 2px 2px rgba(0,0,0,0.5));">`;
+            }
+            if (labelSpan) labelSpan.textContent = 'Pokédex';
+            btn.classList.add('active-mode');
+            btn.setAttribute('title', 'Retour au Pokédex');
+        }
+    }
+    // #endregion
+
+    // #region LOGIQUE INTERNE & RENDU
+    // ============================================================================
     private updateCheckboxesFromAttributes() {
         const langInput = this.querySelector('#header-toggle-lang') as HTMLInputElement;
         const modeInput = this.querySelector('#header-toggle-mode') as HTMLInputElement;
-
-        // Si le HTML n'est pas encore prêt, on sort
         if (!langInput || !modeInput) return;
 
         const currentLang = this.getAttribute('lang') || 'fr';
         const currentMode = this.getAttribute('mode') || 'artwork';
 
-        // Mise à jour des checkboxes (checked = EN ou Legacy)
         langInput.checked = (currentLang === 'en');
         modeInput.checked = (currentMode === 'legacy');
     }
-
-    /* ==========================================================================
-       4. RENDU & ÉVÉNEMENTS
-       ========================================================================== */
 
     private render() {
         const lang = this.getAttribute('lang') || 'fr';
         const mode = this.getAttribute('mode') || 'artwork';
 
-        this.innerHTML = `
+        this.innerHTML = /*html*/ `
             <div class="header-inner">
                 <div class="header-brand">
                     <h1>Poké <span style="color:var(--ink-accent)">Journal</span></h1>
@@ -84,6 +86,11 @@ export class AppHeader extends HTMLElement {
                 </div>
 
                 <div class="header-settings">
+                    <button id="open-team-builder" class="action-pill-btn" title="Gérer mes équipes">
+                        <span class="icon">📜</span> 
+                        <span class="label">Équipes</span>
+                    </button>
+
                     <div class="switch-container">
                         <label class="poke-switch">
                             <input type="checkbox" id="header-toggle-lang" ${lang === 'en' ? 'checked' : ''}>
@@ -105,13 +112,16 @@ export class AppHeader extends HTMLElement {
             </div>
         `;
     }
+    // #endregion
 
+    // #region GESTION DES ÉVÉNEMENTS
+    // ============================================================================
     private attachEvents() {
         const langInput = this.querySelector('#header-toggle-lang');
         const modeInput = this.querySelector('#header-toggle-mode');
+        const actionBtn = this.querySelector('#open-team-builder');
 
         const notifyChange = () => {
-            // Lecture de l'état des inputs
             const isEn = (langInput as HTMLInputElement).checked;
             const isLegacy = (modeInput as HTMLInputElement).checked;
 
@@ -121,7 +131,6 @@ export class AppHeader extends HTMLElement {
             this.setAttribute('lang', newLang);
             this.setAttribute('mode', newMode);
 
-            // On prévient le Controller
             if (this.onSettingsChange) {
                 this.onSettingsChange(newLang, newMode);
             }
@@ -129,7 +138,16 @@ export class AppHeader extends HTMLElement {
 
         langInput?.addEventListener('change', notifyChange);
         modeInput?.addEventListener('change', notifyChange);
+
+        actionBtn?.addEventListener('click', () => {
+            const eventName = this.currentView === 'pokedex' ? 'open-teams' : 'navigate-home';
+            this.dispatchEvent(new CustomEvent(eventName, {
+                bubbles: true,
+                composed: true
+            }));
+        });
     }
+    // #endregion
 }
 
 customElements.define('app-header', AppHeader);

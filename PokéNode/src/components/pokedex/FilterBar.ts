@@ -3,23 +3,18 @@ import type { PokemonType } from '../../types/model';
 
 export class AppFilter extends HTMLElement {
 
-    /* ==========================================================================
-       1. CONFIGURATION
-       ========================================================================== */
-
-    // @ts-ignore
+    // #region CONFIGURATION
+    // ============================================================================
     static get observedAttributes() { return ['type', 'gen', 'lang']; }
 
     public onFilter?: (type: PokemonType | 'all', gen: string | 'all') => void;
 
     private _types: string[] = [];
     private _gens: string[] = [];
+    // #endregion
 
-    /* ==========================================================================
-       2. CYCLE DE VIE
-       ========================================================================== */
-
-    // @ts-ignore
+    // #region CYCLE DE VIE
+    // ============================================================================
     connectedCallback() {
         if (!this.innerHTML.trim()) {
             this.render();
@@ -28,26 +23,21 @@ export class AppFilter extends HTMLElement {
         this.updateSelectsFromAttributes();
     }
 
-    // @ts-ignore
-    attributeChangedCallback(name: string, oldValue: string, newValue: string) {
-        if (oldValue === newValue) return;
+    attributeChangedCallback(name: string, prev: string, next: string) {
+        if (prev === next) return;
 
-        // Si la LANGUE change, on doit re-rendre tout le HTML pour traduire les options
         if (name === 'lang') {
             this.render();
             this.attachEvents();
             this.updateSelectsFromAttributes();
-        }
-        // Si c'est juste le TYPE ou GEN qui change, on met juste à jour la valeur du select
-        else {
+        } else {
             this.updateSelectsFromAttributes();
         }
     }
+    // #endregion
 
-    /* ==========================================================================
-       3. PROPRIÉTÉS
-       ========================================================================== */
-
+    // #region PROPRIÉTÉS
+    // ============================================================================
     set typesList(list: string[]) {
         this._types = list;
         this.render();
@@ -59,11 +49,10 @@ export class AppFilter extends HTMLElement {
         this.render();
         this.attachEvents();
     }
+    // #endregion
 
-    /* ==========================================================================
-       4. RENDU & LOGIQUE
-       ========================================================================== */
-
+    // #region RENDU & LOGIQUE INTERNE
+    // ============================================================================
     private updateSelectsFromAttributes() {
         const typeSelect = this.querySelector('#type-filter') as HTMLSelectElement;
         const genSelect = this.querySelector('#gen-filter') as HTMLSelectElement;
@@ -78,7 +67,7 @@ export class AppFilter extends HTMLElement {
         const currentType = this.getAttribute('type') || 'all';
         const currentGen = this.getAttribute('gen') || 'all';
 
-        this.innerHTML = `
+        this.innerHTML = /*html*/ `
             <div class="filter-group" style="display:flex; gap:10px;">
                 <select id="type-filter" class="filter-select">
                     <option value="all" ${currentType === 'all' ? 'selected' : ''}>${I18n.t('filter_type')}</option>
@@ -118,6 +107,7 @@ export class AppFilter extends HTMLElement {
         typeSelect?.addEventListener('change', handleChange);
         genSelect?.addEventListener('change', handleChange);
     }
+    // #endregion
 }
 
 customElements.define('app-filter', AppFilter);

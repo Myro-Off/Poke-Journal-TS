@@ -1,138 +1,278 @@
-import type { Pokemon, PokemonType, EvolutionNode, PokemonLite } from '../types/model';
+import type { Pokemon, PokemonType, EvolutionNode, PokemonLite, MoveLite } from '../types/model';
 import { I18n } from '../services/I18n';
 
-const BASE_URL = 'https://pokeapi.co/api/v2';
+// #region 0. INTERFACES API (TYPAGE STRICT)
+// ============================================================================
 
-// --- LES CACHES (Performance & Optimisation) ---
+// --- GraphQL Types ---
+interface GQLName { name: string; language_id: number; }
+interface GQLSpecies { id: number; name: string; pokemon_v2_pokemonspeciesnames: GQLName[]; }
+interface GQLAbility { id: number; name: string; pokemon_v2_abilitynames: GQLName[]; }
+interface GQLPokemonVariant {
+    id: number;
+    name: string;
+    pokemon_species_id: number;
+    pokemon_v2_pokemontypes: { pokemon_v2_type: { name: string } }[];
+    pokemon_v2_pokemonabilities: { pokemon_v2_ability: { id: number } }[];
+}
+
+// --- REST API Types ---
+interface ApiName { name: string; language: { name: string } }
+interface ApiFlavorText { flavor_text: string; language: { name: string } }
+interface ApiChainLink {
+    species: { name: string; url: string };
+    evolves_to: ApiChainLink[];
+}
+
+interface ApiEvolutionChain { chain: ApiChainLink }
+interface ApiPokemon {
+    id: number;
+    name: string;
+    height: number;
+    weight: number;
+    types: { type: { name: string } }[];
+    abilities: { ability: { name: string } }[];
+    stats: { base_stat: number; stat: { name: string } }[];
+    moves: { move: { name: string; url: string } }[];
+    sprites: {
+        front_default: string | null;
+        other: { 'official-artwork': { front_default: string | null } };
+    };
+    species: { url: string };
+}
+
+interface ApiSpecies {
+    names: ApiName[];
+    flavor_text_entries: ApiFlavorText[];
+    generation: { name: string };
+    evolution_chain: { url: string };
+}
+
+interface ApiMove {
+    name: string;
+    names: ApiName[];
+    type: { name: string };
+    power: number;
+    accuracy: number;
+    pp: number;
+}
+// #endregion
+
+// #region 1. CONFIGURATION & CACHE
+// ============================================================================
+const BASE_URL = 'https://pokeapi.co/api/v2';
+const GRAPHQL_URL = 'https://beta.pokeapi.co/graphql/v1beta';
+
+// Cache mémoire
 const pokemonCache = new Map<number, Pokemon>();
-const typeCache = new Map<string, any>();
+const typeCache = new Map<string, unknown>(); 
 const abilityCache = new Map<string, string>();
+
+// Cache pour la "Big List"
+let _globalLiteCache: PokemonLite[] = [];
+// #endregion
 
 export const PokemonAPI = {
 
-    /**
-     * Récupère un Pokémon déjà chargé en mémoire
-     */
+    // #region 2. GESTION DU CACHE
+    // ------------------------------------------------------------------------
     getCachedPokemon(id: number): Pokemon | undefined {
         return pokemonCache.get(id);
     },
+    // #endregion
 
-    /**
-     * Récupère les relations de dommages (faiblesses/résistances).
-     * Mise en cache pour éviter les appels répétitifs.
-     */
-    async getTypeRelations(type: string): Promise<any> {
-        if (typeCache.has(type)) {
-            return typeCache.get(type);
-        }
+    // #region 3. RÉCUPÉRATION GLOBALE
+    // ------------------------------------------------------------------------
+
+    async getAllPokemonLite(): Promise<PokemonLite[]> {
+        if (_globalLiteCache.length > 0) return _globalLiteCache;
 
         try {
-            const res = await fetch(`${BASE_URL}/type/${type}`);
-            const data = await res.json();
-            const relations = data.damage_relations;
+            const [speciesMap, abilitiesMap] = await Promise.all([
+                this.fetchAllSpeciesNames(),
+                this.fetchAllAbilityNames()
+            ]);
 
-            typeCache.set(type, relations);
-            return relations;
-        } catch (error) {
-            console.error(`Erreur chargement type ${type}`, error);
-            return null;
+            const pokemons = await this.fetchAllPokemonVariants();
+
+            _globalLiteCache = pokemons.map((p: GQLPokemonVariant) => {
+                const speciesId = p.pokemon_species_id;
+
+                // --- A. TRAITEMENT DU NOM ---
+                let techName = p.name || "unknown";
+                techName = techName.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+
+                const speciesNameFr = speciesMap.get(speciesId) || techName;
+                let finalNameFr = speciesNameFr;
+
+                // Logique variants
+                if (!techName.toLowerCase().includes(speciesNameFr.toLowerCase()) && p.name.includes('-')) {
+                    const rawName = p.name;
+                    if (rawName.includes('-mega-x')) finalNameFr = `Méga-${speciesNameFr} X`;
+                    else if (rawName.includes('-mega-y')) finalNameFr = `Méga-${speciesNameFr} Y`;
+                    else if (rawName.includes('-mega')) finalNameFr = `Méga-${speciesNameFr}`;
+                    else if (rawName.includes('-gmax')) finalNameFr = `${speciesNameFr} Gigamax`;
+                    else if (rawName.includes('-alola')) finalNameFr = `${speciesNameFr} d'Alola`;
+                    else if (rawName.includes('-galar')) finalNameFr = `${speciesNameFr} de Galar`;
+                    else if (rawName.includes('-hisui')) finalNameFr = `${speciesNameFr} d'Hisui`;
+                    else if (rawName.includes('-paldea')) finalNameFr = `${speciesNameFr} de Paldea`;
+                    else if (rawName.includes('-primal')) finalNameFr = `Primo-${speciesNameFr}`;
+                }
+                finalNameFr = finalNameFr.charAt(0).toUpperCase() + finalNameFr.slice(1);
+
+                // --- B. TRAITEMENT DES TYPES ---
+                const types = p.pokemon_v2_pokemontypes.map(t => t.pokemon_v2_type.name);
+
+                // --- C. TRAITEMENT DES TALENTS ---
+                const pokemonAbilityIds = p.pokemon_v2_pokemonabilities.map(pa => pa.pokemon_v2_ability.id);
+                
+                const abilitiesFr: string[] = [];
+                const abilitiesEn: string[] = [];
+
+                pokemonAbilityIds.forEach((id) => {
+                    const names = abilitiesMap.get(id);
+                    if (names) {
+                        if (names.fr) abilitiesFr.push(names.fr);
+                        if (names.en) abilitiesEn.push(names.en);
+                    }
+                });
+
+                return {
+                    id: p.id,
+                    name: finalNameFr,
+                    nameEn: techName,
+                    url: `${BASE_URL}/pokemon/${p.id}/`,
+                    types: types as PokemonType[],
+                    abilities: { fr: abilitiesFr, en: abilitiesEn }
+                };
+            });
+
+            return _globalLiteCache;
+
+        } catch (e) {
+            console.warn("⚠️ Échec stratégie Split Query, passage en mode secours (REST).", e);
+            return this.getAllPokemonLiteFallback();
         }
     },
 
-    /**
-     * Récupère la liste légère (ID + Nom + URL) de TOUS les Pokémon.
-     */
-    async getAllPokemonLite(): Promise<PokemonLite[]> {
-        const response = await fetch(`${BASE_URL}/pokemon?limit=1500`);
+    async fetchAllSpeciesNames(): Promise<Map<number, string>> {
+        const query = `query { pokemon_v2_pokemonspecies(order_by: {id: asc}) { id name pokemon_v2_pokemonspeciesnames(where: {language_id: {_eq: 5}}) { name } } }`;
+        try {
+            const res = await fetch(GRAPHQL_URL, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({query}) });
+            const json = await res.json();
+            const map = new Map<number, string>();
+            
+            if (json.data?.pokemon_v2_pokemonspecies) {
+                // Typage explicite de 's' via l'interface GQLSpecies
+                json.data.pokemon_v2_pokemonspecies.forEach((s: GQLSpecies) => {
+                    const name = s.pokemon_v2_pokemonspeciesnames[0]?.name || s.name;
+                    map.set(s.id, name);
+                });
+            }
+            return map;
+        } catch { return new Map(); }
+    },
+
+    async fetchAllAbilityNames(): Promise<Map<number, { fr: string, en: string }>> {
+        const query = `
+            query {
+                pokemon_v2_ability {
+                    id
+                    name
+                    pokemon_v2_abilitynames(where: {language_id: {_in: [5, 9]}}) {
+                        name
+                        language_id
+                    }
+                }
+            }
+        `;
+
+        try {
+            const res = await fetch(GRAPHQL_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query }) });
+            const json = await res.json();
+            const map = new Map<number, { fr: string, en: string }>();
+
+            if (json.data?.pokemon_v2_ability) {
+                json.data.pokemon_v2_ability.forEach((a: GQLAbility) => {
+                    let fr = a.name;
+                    let en = a.name;
+
+                    a.pokemon_v2_abilitynames.forEach((n) => {
+                        if (n.language_id === 5) fr = n.name;
+                        if (n.language_id === 9) en = n.name;
+                    });
+                    map.set(a.id, { fr, en });
+                });
+            }
+            return map;
+        } catch (e) {
+            console.error("❌ Erreur GraphQL Abilities", e);
+            return new Map();
+        }
+    },
+
+    async fetchAllPokemonVariants(): Promise<GQLPokemonVariant[]> {
+        const query = `
+            query {
+                pokemon_v2_pokemon(order_by: {id: asc}) {
+                    id
+                    name
+                    pokemon_species_id
+                    pokemon_v2_pokemontypes {
+                        pokemon_v2_type {
+                            name
+                        }
+                    }
+                    pokemon_v2_pokemonabilities {
+                        pokemon_v2_ability {
+                            id
+                        }
+                    }
+                }
+            }
+        `;
+        try {
+            const res = await fetch(GRAPHQL_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query }) });
+            const json = await res.json();
+            return (json.data?.pokemon_v2_pokemon as GQLPokemonVariant[]) || [];
+        } catch { return []; }
+    },
+
+    async getAllPokemonLiteFallback(): Promise<PokemonLite[]> {
+        const response = await fetch(`${BASE_URL}/pokemon?limit=2000`);
         const data = await response.json();
-
-        // Regex qui cherche le dernier nombre entouré de slashs dans l'URL
-        const idRegex = /\/(\d+)\/$/;
-
-        return data.results.map((p: any) => {
-            const match = p.url.match(idRegex);
-            const id = match ? Number.parseInt(match[1]) : 0;
-
+        
+        // Typage du résultat brut de "results"
+        return data.results.map((p: { name: string; url: string }) => {
+            const id = Number(p.url.split('/').slice(-2, -1)[0]);
             return {
+                id: id,
                 name: p.name,
+                nameEn: p.name,
                 url: p.url,
-                id: id
+                types: [],
+                abilities: { fr: [], en: [] }
             };
         });
     },
+    // #endregion
 
-    /**
-     * Récupère les IDs des Pokémon d'un certain Type.
-     */
-    async getIdsByType(type: string): Promise<number[]> {
-        if (type === 'all') return [];
-
-        try {
-            const response = await fetch(`${BASE_URL}/type/${type}`);
-            const data = await response.json();
-
-            return data.pokemon.map((p: any) => {
-                const parts = p.pokemon.url.split('/');
-                return Number.parseInt(parts[parts.length - 2]);
-            });
-        } catch (e) {
-            console.error("Erreur API Type", e);
-            return [];
-        }
-    },
-
-    /**
-     * Récupère les IDs des Pokémon d'une Génération.
-     * Accepte "generation-i" ou "I".
-     */
-    async getIdsByGen(gen: string): Promise<number[]> {
-        if (gen === 'all') return [];
-
-        // Sécurité : Si on reçoit juste "I", on le transforme en "generation-i"
-        let query = gen.toLowerCase();
-        if (!query.startsWith('generation-')) {
-            query = `generation-${query}`;
-        }
-
-        try {
-            const response = await fetch(`${BASE_URL}/generation/${query}`);
-            const data = await response.json();
-
-            return data.pokemon_species.map((p: any) => {
-                const parts = p.url.split('/');
-                return Number.parseInt(parts[parts.length - 2]);
-            });
-        } catch (e) {
-            console.error("Erreur API Gen", e);
-            return [];
-        }
-    },
-
-    /**
-     * Récupère TOUS les détails d'un Pokémon.
-     * Combine les données /pokemon/id et /pokemon-species/id.
-     */
+    // #region 4. DÉTAILS COMPLETS (MODALE)
+    // ------------------------------------------------------------------------
     async getPokemonDetails(id: number): Promise<Pokemon> {
-        if (pokemonCache.has(id)) {
-            return pokemonCache.get(id)!;
-        }
+        if (pokemonCache.has(id)) return pokemonCache.get(id)!;
 
-        // 1. Appel Données Techniques (Stats, Types, Sprites)
         const pokemonRes = await fetch(`${BASE_URL}/pokemon/${id}`);
         if (!pokemonRes.ok) throw new Error(`Pokemon ${id} not found`);
-        const data = await pokemonRes.json();
+        const data = await pokemonRes.json() as ApiPokemon; // Cast vers Interface
 
-        // 2. Appel Données Espèce (Noms FR, Description, Evolution, Gen)
         const speciesRes = await fetch(data.species.url);
-        const speciesData = await speciesRes.json();
+        const speciesData = await speciesRes.json() as ApiSpecies; // Cast vers Interface
 
-        // --- LOGIQUE DE NOMMAGE (UX) ---
-        let nameFr = speciesData.names.find((n: any) => n.language.name === 'fr')?.name || data.name;
-        let nameEn = data.name;
-
+        // Noms
+        let nameFr = speciesData.names.find(n => n.language.name === 'fr')?.name || data.name;
         const technicalName = data.name.toLowerCase();
 
-        // Gestion des formes spéciales pour un affichage propre
         if (technicalName.includes('-mega-x')) nameFr = `Méga-${nameFr} X`;
         else if (technicalName.includes('-mega-y')) nameFr = `Méga-${nameFr} Y`;
         else if (technicalName.includes('-mega')) nameFr = `Méga-${nameFr}`;
@@ -143,24 +283,14 @@ export const PokemonAPI = {
         else if (technicalName.includes('-paldea')) nameFr = `${nameFr} de Paldea`;
         else if (technicalName.includes('-primal')) nameFr = `${nameFr} Primo`;
 
-        // Formatage Nom EN (mr-mime -> Mr Mime)
-        nameEn = nameEn.split('-').map((word: string) => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
-
-        // Détection Génération
-        const genApiName = speciesData.generation?.name || "generation-i";
-        const genRoman = genApiName.split('-')[1].toUpperCase();
-
-        // Description
-        const flavorEntries = speciesData.flavor_text_entries;
-        const getDesc = (lang: string) => flavorEntries
-                .find((f: any) => f.language.name === lang)?.flavor_text
-                ?.replaceAll(/[\n\f]/g, ' ') // En cas de saut de ligne de l'API
-            || "Description non disponible.";
+        let nameEn = data.name.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+        
+        const getDesc = (lang: string) => speciesData.flavor_text_entries.find(f => f.language.name === lang)?.flavor_text?.replaceAll(/[\n\f]/g, ' ') || "Description non disponible.";
 
         const pokemonFull: Pokemon = {
             id: data.id,
             name: { en: nameEn, fr: nameFr },
-            types: data.types.map((t: any) => t.type.name as PokemonType),
+            types: data.types.map(t => t.type.name as PokemonType),
             stats: {
                 hp: data.stats[0].base_stat,
                 attack: data.stats[1].base_stat,
@@ -169,94 +299,117 @@ export const PokemonAPI = {
                 specialDefense: data.stats[4].base_stat,
                 speed: data.stats[5].base_stat,
             },
-            // On nettoie le nom des abilities (overgrow -> Overgrow)
-            abilities: data.abilities.map((a: any) => a.ability.name),
-            generation: genRoman,
-            region: I18n.translateRegion(genRoman),
+            moves: data.moves ? data.moves.map(m => ({ name: m.move.name, url: m.move.url })) : [],
+            abilities: data.abilities.map(a => a.ability.name),
+            generation: (speciesData.generation?.name || "generation-i").split('-')[1].toUpperCase(),
+            region: I18n.translateRegion((speciesData.generation?.name || "generation-i").split('-')[1].toUpperCase()),
             height: data.height,
             weight: data.weight,
-            evolutionUrl: speciesData.evolution_chain.url,
+            evolutionUrl: speciesData.evolution_chain?.url || "",
             description: { fr: getDesc('fr'), en: getDesc('en') },
             sprites: {
                 front_default: data.sprites.front_default,
-                other: {
-                    'official-artwork': {
-                        front_default: data.sprites.other['official-artwork'].front_default
-                    }
-                }
+                other: { 'official-artwork': { front_default: data.sprites.other?.['official-artwork']?.front_default || null } }
             }
         };
 
         pokemonCache.set(id, pokemonFull);
         return pokemonFull;
     },
+    // #endregion
 
-    /**
-     * Traduit une capacité (Ability) avec mise en cache.
-     */
-    async getAbilityTranslation(abilityName: string, lang: 'fr' | 'en'): Promise<string> {
-        const cacheKey = `${abilityName}-${lang}`;
-        if (abilityCache.has(cacheKey)) {
-            return abilityCache.get(cacheKey)!;
-        }
-
+    // #region 5. UTILITAIRES DIVERS
+    // ------------------------------------------------------------------------
+    
+    async getMoveDetails(url: string): Promise<MoveLite> {
         try {
-            const res = await fetch(`https://pokeapi.co/api/v2/ability/${abilityName}`);
-            const data = await res.json();
-            const translation = data.names.find((n: any) => n.language.name === lang);
-            const result = translation ? translation.name : abilityName;
-
-            abilityCache.set(cacheKey, result);
-            return result;
-        } catch (error) {
-            return abilityName;
-        }
+            const res = await fetch(url);
+            const data = await res.json() as ApiMove;
+            const nameFr = data.names.find(n => n.language.name === 'fr')?.name || data.name;
+            return {
+                name: nameFr,
+                url: url,
+                type: data.type.name,
+                power: data.power,
+                accuracy: data.accuracy,
+                pp: data.pp
+            };
+        } catch { return { name: "Erreur", url: url }; }
     },
 
-    /**
-     * Construit l'arbre d'évolution récursivement
-     */
+    async getAbilityTranslation(abilityName: string, lang: 'fr' | 'en'): Promise<string> {
+        const cacheKey = `${abilityName}-${lang}`;
+        if (abilityCache.has(cacheKey)) return abilityCache.get(cacheKey)!;
+        try {
+            const res = await fetch(`${BASE_URL}/ability/${abilityName}`);
+            // TODO : faire les détails de abilities
+            const data = await res.json() as { names: ApiName[], name: string };
+            
+            const translation = data.names.find(n => n.language.name === lang);
+            const result = translation ? translation.name : abilityName;
+            abilityCache.set(cacheKey, result);
+            return result;
+        } catch { return abilityName; }
+    },
+
+    async getTypeRelations(type: string): Promise<any>{
+        if (typeCache.has(type)) return typeCache.get(type);
+        try {
+            const res = await fetch(`${BASE_URL}/type/${type}`);
+            const data = await res.json();
+            typeCache.set(type, data.damage_relations);
+            return data.damage_relations;
+        } catch { return null; }
+    },
+
     async getEvolutionChain(url: string): Promise<EvolutionNode> {
+        if (!url) throw new Error("URL manquante");
         const response = await fetch(url);
-        const data = await response.json();
+        const data = await response.json() as ApiEvolutionChain;
 
-        const buildChain = (chainData: any): EvolutionNode => {
-            const parts = chainData.species.url.split('/');
-            const id = Number.parseInt(parts[parts.length - 2]);
-
+        const buildChain = (chainData: ApiChainLink): EvolutionNode => {
+            const id = Number(chainData.species.url.split('/').slice(-2, -1)[0]);
             return {
                 name: chainData.species.name,
                 id: id,
                 image: `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/${id}.png`,
-                evolvesTo: chainData.evolves_to.map((evo: any) => buildChain(evo))
+                evolvesTo: chainData.evolves_to.map((evo) => buildChain(evo))
             };
         };
-
         return buildChain(data.chain);
     },
 
-    // --- LISTES DYNAMIQUES (Pour les filtres) ---
-
     async getTypesList(): Promise<string[]> {
         try {
-            const response = await fetch(`${BASE_URL}/type`);
-            const data = await response.json();
+            const res = await fetch(`${BASE_URL}/type`);
+            const data = await res.json();
             return data.results
-                .map((t: any) => t.name)
-                .filter((t: string) => t !== 'unknown' && t !== 'shadow');
-        } catch (e) {
-            return ['normal', 'fire', 'water', 'grass', 'electric'];
-        }
+                .map((t: { name: string }) => t.name)
+                .filter((t: string) => !['unknown', 'shadow', 'stellar'].includes(t));
+        } catch { return ['normal', 'fire', 'water', 'grass']; }
     },
 
     async getGenerationsList(): Promise<string[]> {
         try {
-            const response = await fetch(`${BASE_URL}/generation`);
-            const data = await response.json();
-            // On extrait juste le chiffre romain de "generation-viii"
-            return data.results.map((g: any) => g.name.split('-')[1].toUpperCase());
-        } catch (e) {
-            return ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI', 'XII'];
-        }
+            const res = await fetch(`${BASE_URL}/generation`);
+            const data = await res.json();
+            return data.results.map((g: { name: string }) => g.name.split('-')[1].toUpperCase());
+        } catch { return ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX']; }
+    },
+
+    async getIdsByType(type: string): Promise<number[]> {
+        if (type === 'all') return [];
+        const res = await fetch(`${BASE_URL}/type/${type}`);
+        const data = await res.json();
+        return data.pokemon.map((p: { pokemon: { url: string } }) => Number(p.pokemon.url.split('/').slice(-2, -1)[0]));
+    },
+
+    async getIdsByGen(gen: string): Promise<number[]> {
+        if (gen === 'all') return [];
+        let query = gen.toLowerCase().startsWith('generation-') ? gen.toLowerCase() : `generation-${gen.toLowerCase()}`;
+        const res = await fetch(`${BASE_URL}/generation/${query}`);
+        const data = await res.json();
+        return data.pokemon_species.map((p: { url: string }) => Number(p.url.split('/').slice(-2, -1)[0]));
     }
+    // #endregion
 };

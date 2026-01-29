@@ -6,15 +6,18 @@ import { I18n } from '../../services/I18n';
 
 export class PokeModal extends HTMLElement {
 
-    // @ts-ignore
+    // #region CONFIGURATION & ÉTAT
+    // ============================================================================
     static get observedAttributes() { return ['lang', 'mode', 'open']; }
 
     private currentList: Pokemon[] = [];
     private currentIndex: number = -1;
     private _pokemon: Pokemon | null = null;
     private _evolution: EvolutionNode | null = null;
+    // #endregion
 
-    // @ts-ignore
+    // #region CYCLE DE VIE
+    // ============================================================================
     connectedCallback() {
         if (!this.querySelector('.modal-content')) {
             this.renderBase();
@@ -22,33 +25,30 @@ export class PokeModal extends HTMLElement {
         }
     }
 
-    // @ts-ignore
-    attributeChangedCallback(name: string, oldValue: string, newValue: string) {
-        if (oldValue === newValue) return;
+    attributeChangedCallback(name: string, prev: string, next: string) {
+        if (prev === next) return;
 
         if (name === 'open') {
-            if (newValue === 'true') {
-                document.body.style.overflow = 'hidden';
-                ModalAudio.playPaperSound();
-            } else {
-                document.body.style.overflow = '';
-            }
+            document.body.style.overflow = next === 'true' ? 'hidden' : '';
+            if (next === 'true') ModalAudio.playPaperSound();
         }
 
-        if (name === 'lang' || name === 'mode') {
+        if ((name === 'lang' || name === 'mode') && this.getAttribute('open') === 'true' && this._pokemon) {
             this.syncCheckboxes();
-            // On re-rend uniquement si ouvert
-            if (this.getAttribute('open') === 'true' && this._pokemon) {
-                this.renderContent();
-                this.fetchEnrichments(this._pokemon);
-            }
+            this.renderContent();
+            // On relance les enrichissements (traduction) car la langue a changé
+            this.fetchEnrichments(this._pokemon);
         }
     }
+    // #endregion
 
+    // #region API PUBLIQUE (OPEN / CLOSE)
+    // ============================================================================
     public open(pokemon: Pokemon) {
         this._pokemon = pokemon;
         this._evolution = null;
         this.currentIndex = this.currentList.findIndex(p => p.id === pokemon.id);
+        
         this.setAttribute('open', 'true');
         this.renderContent();
         this.fetchEnrichments(pokemon);
@@ -61,7 +61,10 @@ export class PokeModal extends HTMLElement {
     set contextList(list: Pokemon[]) {
         this.currentList = list;
     }
+    // #endregion
 
+    // #region HELPERS INTERNES
+    // ============================================================================
     private get currentLang(): Language {
         return (this.getAttribute('lang') as Language) || 'fr';
     }
@@ -70,60 +73,67 @@ export class PokeModal extends HTMLElement {
         return (this.getAttribute('mode') as ImageMode) || 'artwork';
     }
 
-    private renderBase() {
-        this.innerHTML = ModalTemplates.getBaseHTML(this.currentLang, this.currentMode);
-    }
-
-    private renderContent() {
-        if (!this._pokemon) return;
-        const modalBody = this.querySelector('#modal-body');
-        if (!modalBody) return;
-
-        modalBody.innerHTML = ModalTemplates.getPokemonContentHTML(
-            this._pokemon,
-            this.currentMode,
-            this.currentLang,
-            this._evolution
-        );
-
-        ModalAudio.setupCry(this._pokemon, this.currentMode);
-        if (this._evolution) this.attachEvoClicks();
-    }
-
     private syncCheckboxes() {
         const langIn = this.querySelector('#modal-toggle-lang') as HTMLInputElement;
         const modeIn = this.querySelector('#modal-toggle-mode') as HTMLInputElement;
         if (langIn) langIn.checked = (this.currentLang === 'en');
         if (modeIn) modeIn.checked = (this.currentMode === 'legacy');
     }
+    // #endregion
 
+    // #region RENDU (BASE & CONTENU)
+    // ============================================================================
+    private renderBase() {
+        this.innerHTML = ModalTemplates.getBaseHTML(this.currentLang, this.currentMode);
+    }
+
+    private renderContent() {
+        if (!this._pokemon) return;
+        const body = this.querySelector('#modal-body');
+        if (!body) return;
+
+        body.innerHTML = ModalTemplates.getPokemonContentHTML(
+            this._pokemon, this.currentMode, this.currentLang, this._evolution
+        );
+
+        ModalAudio.setupCry(this._pokemon, this.currentMode);
+        if (this._evolution) this.attachEvoClicks();
+    }
+    // #endregion
+
+    // #region ENRICHISSEMENTS ASYNCHRONES (API)
+    // ============================================================================
     private async fetchEnrichments(pokemon: Pokemon) {
         try {
-            const [translatedAbilities, typeRelationsList] = await Promise.all([
-                Promise.all(pokemon.abilities.map(a => PokemonAPI.getAbilityTranslation(a, this.currentLang))),
-                Promise.all(pokemon.types.map(t => PokemonAPI.getTypeRelations(t)))
-            ]);
+            // Traduction des Talents (Abilities)
+            const abilities = await Promise.all(
+                pokemon.abilities.map(a => PokemonAPI.getAbilityTranslation(a, this.currentLang))
+            );
 
+            // Sécurité : Si l'utilisateur a changé de Pokémon entre temps, on annule
             if (this._pokemon?.id !== pokemon.id) return;
 
-            this._pokemon = { ...pokemon, abilities: translatedAbilities };
+            this._pokemon = { ...pokemon, abilities };
             const metaVal = this.querySelector('.meta-value-abilities');
-            if (metaVal) metaVal.textContent = translatedAbilities.join(', ');
+            if (metaVal) metaVal.textContent = abilities.join(', ');
 
-            const htmls = ModalTemplates.getEfficaciesHTML(typeRelationsList);
+            // Calcul des Faiblesses (TypeCalculator)
+            const htmls = ModalTemplates.getEfficaciesHTML(pokemon.types);
             const weakList = this.querySelector('#modal-weak-list');
             const resistList = this.querySelector('#modal-resist-list');
+            
             if (weakList) weakList.innerHTML = htmls.weak;
             if (resistList) resistList.innerHTML = htmls.resist;
 
+            // Chaîne d'Évolution
             const chain = await PokemonAPI.getEvolutionChain(pokemon.evolutionUrl);
             await this.translateEvoTree(chain);
 
             if (this._pokemon?.id === pokemon.id) {
                 this._evolution = chain;
-                const evoContainer = this.querySelector('#modal-evo-content');
-                if (evoContainer) {
-                    evoContainer.innerHTML = `
+                const container = this.querySelector('#modal-evo-content');
+                if (container) {
+                    container.innerHTML = `
                         <div class="evo-tree-container" style="display:flex; justify-content:center; overflow-x:auto; padding:10px;">
                             ${ModalTemplates.buildEvolutionHTML(chain, this.currentMode)}
                         </div>`;
@@ -136,20 +146,24 @@ export class PokeModal extends HTMLElement {
     private async translateEvoTree(node: EvolutionNode): Promise<void> {
         try {
             const res = await fetch(`https://pokeapi.co/api/v2/pokemon-species/${node.id}`);
-            const data = await res.json();
-            const name = data.names.find((n: any) => n.language.name === this.currentLang)?.name;
+            // Typage de la réponse partielle pour le nom
+            const data = await res.json() as { names: { name: string, language: { name: string } }[] };
+            
+            const name = data.names.find(n => n.language.name === this.currentLang)?.name;
             if (name) node.name = name;
-        } catch { }
+        } catch {}
+
         if (node.evolvesTo?.length > 0) {
             await Promise.all(node.evolvesTo.map(child => this.translateEvoTree(child)));
         }
     }
+    // #endregion
 
+    // #region ÉVÉNEMENTS & NAVIGATION
+    // ============================================================================
     private attachGlobalEvents() {
         this.addEventListener('click', (e) => {
-            if (e.target === this) {
-                this.close();
-            }
+            if (e.target === this) this.close();
         });
 
         this.querySelector('#close-modal')?.addEventListener('click', () => this.close());
@@ -159,18 +173,16 @@ export class PokeModal extends HTMLElement {
         const toggleHandler = () => {
             const langIn = this.querySelector('#modal-toggle-lang') as HTMLInputElement;
             const modeIn = this.querySelector('#modal-toggle-mode') as HTMLInputElement;
-
+            
             const newLang: Language = langIn.checked ? 'en' : 'fr';
             const newMode: ImageMode = modeIn.checked ? 'legacy' : 'artwork';
 
             I18n.currentLang = newLang;
-
             this.setAttribute('lang', newLang);
             this.setAttribute('mode', newMode);
 
             this.dispatchEvent(new CustomEvent('settings-change', {
-                detail: { lang: newLang, mode: newMode },
-                bubbles: true
+                detail: { lang: newLang, mode: newMode }, bubbles: true
             }));
         };
 
@@ -179,8 +191,7 @@ export class PokeModal extends HTMLElement {
 
         globalThis.addEventListener('keydown', (e) => {
             if (this.getAttribute('open') === 'true') {
-                e.stopPropagation();
-
+                e.stopPropagation(); // Bloque l'événement pour ne pas scroller la page derrière
                 if (e.key === 'Escape') this.close();
                 if (e.key === 'ArrowLeft') this.navigate(-1);
                 if (e.key === 'ArrowRight') this.navigate(1);
@@ -193,7 +204,10 @@ export class PokeModal extends HTMLElement {
             el.addEventListener('click', (e) => {
                 e.stopPropagation();
                 const id = Number((e.currentTarget as HTMLElement).dataset.id);
+                
+                // On vérifie d'abord si le Pokémon est déjà dans la liste de la grille (pour éviter un appel réseau)
                 const next = this.currentList.find(p => p.id === id);
+                
                 if (next) this.open(next);
                 else PokemonAPI.getPokemonDetails(id).then(p => this.open(p));
             });
@@ -203,10 +217,14 @@ export class PokeModal extends HTMLElement {
     private navigate(dir: number) {
         if (this.currentList.length === 0) return;
         let newIdx = this.currentIndex + dir;
+        
+        // Bouclage (Carrousel)
         if (newIdx < 0) newIdx = this.currentList.length - 1;
         if (newIdx >= this.currentList.length) newIdx = 0;
+        
         this.open(this.currentList[newIdx]);
     }
+    // #endregion
 }
 
 customElements.define('poke-modal', PokeModal);

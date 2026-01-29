@@ -2,56 +2,39 @@ import { I18n } from '../../services/I18n';
 
 export class AppSearch extends HTMLElement {
 
-    /* ==========================================================================
-       1. CONFIGURATION
-       ========================================================================== */
-
-    // @ts-ignore
+    // #region 1. Config & Attributes
     static get observedAttributes() { return ['lang']; }
-
     public onSearch?: (text: string) => void;
+    // #endregion
 
-    /* ==========================================================================
-       2. CYCLE DE VIE
-       ========================================================================== */
-
-    // @ts-ignore
+    // #region 2. Lifecycle
     connectedCallback() {
         if (!this.innerHTML.trim()) {
             this.render();
-            this.attachEvents();
+            this.bindEvents();
         }
     }
 
-    // @ts-ignore
-    attributeChangedCallback(name: string, oldValue: string, newValue: string) {
-        if (name === 'lang' && oldValue !== newValue) {
+    attributeChangedCallback(name: string, prev: string, next: string) {
+        if (name === 'lang' && prev !== next) {
             const input = this.querySelector('input');
-            if (input) {
-                input.placeholder = I18n.t('search_placeholder');
-            }
+            if (input) input.placeholder = I18n.t('search_placeholder');
         }
     }
+    // #endregion
 
-    /* ==========================================================================
-       3. API PUBLIQUE
-       ========================================================================== */
-
+    // #region 3. Public API
     set value(val: string) {
         const input = this.querySelector('input');
         if (input) input.value = val;
     }
 
-    // @ts-ignore
     get value(): string {
-        const input = this.querySelector('input');
-        return input ? input.value : '';
+        return this.querySelector('input')?.value || '';
     }
+    // #endregion
 
-    /* ==========================================================================
-       4. RENDU
-       ========================================================================== */
-
+    // #region 4. Rendering
     private render() {
         this.innerHTML = `
             <div class="search-wrapper">
@@ -63,14 +46,16 @@ export class AppSearch extends HTMLElement {
             </div>
         `;
     }
+    // #endregion
 
-    private attachEvents() {
-        const input = this.querySelector('input');
-        input?.addEventListener('input', (e: Event) => {
-            const text = (e.target as HTMLInputElement).value.trim();
-            if (this.onSearch) this.onSearch(text);
+    // #region 5. Events
+    private bindEvents() {
+        this.querySelector('input')?.addEventListener('input', (e) => {
+            const val = (e.target as HTMLInputElement).value.trim();
+            this.onSearch?.(val);
         });
     }
+    // #endregion
 }
 
 customElements.define('app-search', AppSearch);
