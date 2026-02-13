@@ -1,68 +1,92 @@
 import type { Pokemon, ImageMode } from '../../../types/model';
 
-export const ModalAudio = {
+export class ModalAudio {
 
     // #region EFFETS SONORES UI
     // ============================================================================
-    // permet de jouer le son quand on vient d'ouvrir un modal sans y avoir touché pour certains navigateurs
-    playPaperSound(): void {
+    static playPaperSound(): void {
         try {
             const audio = new Audio('https://raw.githubusercontent.com/PokeAPI/cries/main/cries/pokemon/latest/25.ogg');
             audio.volume = 0.0;
         } catch (e) { }
-    },
+    }
     // #endregion
 
     // #region GESTION DES CRIS
     // ============================================================================
-    setupCry(pokemon: Pokemon, mode: ImageMode): void {
+    static setupCry(pokemon: Pokemon, mode: ImageMode): void {
         const btn = document.getElementById('play-cry') as HTMLButtonElement;
         if (!btn) return;
 
-        const baseUrl = 'https://raw.githubusercontent.com/PokeAPI/cries/main/cries/pokemon';
-        const primaryUrl = mode === 'legacy' ? `${baseUrl}/legacy/${pokemon.id}.ogg` : `${baseUrl}/latest/${pokemon.id}.ogg`;
-        const fallbackUrl = mode === 'legacy' ? `${baseUrl}/latest/${pokemon.id}.ogg` : `${baseUrl}/legacy/${pokemon.id}.ogg`;
+        this.setButtonLoading(btn);
 
-        const loadAudio = (url: string, isRetry: boolean = false) => {
-            const audio = new Audio(url);
-            audio.volume = 0.5;
+        const { primary, fallback } = this.getCryUrls(pokemon.id, mode);
+        this.loadAudioChain(btn, primary, fallback);
+    }
+    // #endregion
 
-            audio.oncanplaythrough = () => {
-                btn.disabled = false;
-                btn.style.opacity = "1";
-                btn.style.cursor = "pointer";
+    // #region LOGIQUE DE CHARGEMENT
+    // ============================================================================
+    private static loadAudioChain(btn: HTMLButtonElement, url: string, fallbackUrl: string | null) {
+        const audio = new Audio(url);
+        audio.volume = 0.5;
 
-                btn.onclick = (e: MouseEvent) => {
-                    e.stopPropagation();
-                    btn.classList.remove('is-playing');
-                    void btn.offsetWidth; 
-                    btn.classList.add('is-playing');
-
-                    audio.currentTime = 0;
-                    audio.play().catch(console.error);
-                };
-
-                audio.onended = () => btn.classList.remove('is-playing');
-            };
-
-            audio.onerror = () => {
-                if (!isRetry) {
-                    loadAudio(fallbackUrl, true);
-                } else {
-                    btn.disabled = true;
-                    btn.style.opacity = "0.5";
-                    btn.style.cursor = "default";
-                    const label = btn.querySelector('.cry-label');
-                    if (label) label.textContent = "Muet";
-                }
-            };
+        audio.oncanplaythrough = () => this.enableButton(btn, audio);
+        
+        audio.onerror = () => {
+            if (fallbackUrl) {
+                this.loadAudioChain(btn, fallbackUrl, null);
+            } else {
+                this.disableButton(btn);
+            }
         };
+    }
 
+    private static getCryUrls(id: number, mode: ImageMode): { primary: string, fallback: string } {
+        const baseUrl = 'https://raw.githubusercontent.com/PokeAPI/cries/main/cries/pokemon';
+        const isLegacy = mode === 'legacy';
+
+        return {
+            primary: isLegacy ? `${baseUrl}/legacy/${id}.ogg` : `${baseUrl}/latest/${id}.ogg`,
+            fallback: isLegacy ? `${baseUrl}/latest/${id}.ogg` : `${baseUrl}/legacy/${id}.ogg`
+        };
+    }
+    // #endregion
+
+    // #region GESTION UI BOUTON
+    // ============================================================================
+    private static setButtonLoading(btn: HTMLButtonElement) {
         btn.disabled = true;
         btn.style.opacity = "0.6";
         btn.style.cursor = "wait";
+    }
 
-        loadAudio(primaryUrl);
+    private static enableButton(btn: HTMLButtonElement, audio: HTMLAudioElement) {
+        btn.disabled = false;
+        btn.style.opacity = "1";
+        btn.style.cursor = "pointer";
+
+        btn.onclick = (e: MouseEvent) => {
+            e.stopPropagation();
+            
+            btn.classList.remove('is-playing');
+            void btn.offsetWidth; 
+            btn.classList.add('is-playing');
+
+            audio.currentTime = 0;
+            audio.play().catch(console.error);
+        };
+
+        audio.onended = () => btn.classList.remove('is-playing');
+    }
+
+    private static disableButton(btn: HTMLButtonElement) {
+        btn.disabled = true;
+        btn.style.opacity = "0.5";
+        btn.style.cursor = "default";
+        
+        const label = btn.querySelector('.cry-label');
+        if (label) label.textContent = "Muet";
     }
     // #endregion
-};
+}

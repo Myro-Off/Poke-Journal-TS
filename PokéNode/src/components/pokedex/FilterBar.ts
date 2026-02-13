@@ -3,67 +3,58 @@ import type { PokemonType } from '../../types/model';
 
 export class AppFilter extends HTMLElement {
 
-    // #region CONFIGURATION
+    // #region CONFIGURATION & ÉTAT
     // ============================================================================
-    static get observedAttributes() { return ['type', 'gen', 'lang']; }
+    static get observedAttributes() { 
+        return ['type', 'gen', 'lang']; 
+    }
 
     public onFilter?: (type: PokemonType | 'all', gen: string | 'all') => void;
 
-    private _types: string[] = [];
-    private _gens: string[] = [];
+    private availableTypes: string[] = [];
+    private availableGens: string[] = [];
     // #endregion
 
     // #region CYCLE DE VIE
     // ============================================================================
     connectedCallback() {
-        if (!this.innerHTML.trim()) {
-            this.render();
-            this.attachEvents();
+        if (!this.hasChildNodes()) {
+            this.renderLayout();
+            this.bindEvents();
         }
-        this.updateSelectsFromAttributes();
+        this.syncSelectsWithAttributes();
     }
 
     attributeChangedCallback(name: string, prev: string, next: string) {
         if (prev === next) return;
 
         if (name === 'lang') {
-            this.render();
-            this.attachEvents();
-            this.updateSelectsFromAttributes();
+            this.renderLayout();
+            this.bindEvents();
         } else {
-            this.updateSelectsFromAttributes();
+            this.syncSelectsWithAttributes();
         }
     }
     // #endregion
 
-    // #region PROPRIÉTÉS
+    // #region API PUBLIQUE
     // ============================================================================
     set typesList(list: string[]) {
-        this._types = list;
-        this.render();
-        this.attachEvents();
+        this.availableTypes = list;
+        this.renderLayout();
+        this.bindEvents();
     }
 
     set gensList(list: string[]) {
-        this._gens = list;
-        this.render();
-        this.attachEvents();
+        this.availableGens = list;
+        this.renderLayout();
+        this.bindEvents();
     }
     // #endregion
 
-    // #region RENDU & LOGIQUE INTERNE
+    // #region RENDU
     // ============================================================================
-    private updateSelectsFromAttributes() {
-        const typeSelect = this.querySelector('#type-filter') as HTMLSelectElement;
-        const genSelect = this.querySelector('#gen-filter') as HTMLSelectElement;
-
-        if (!typeSelect || !genSelect) return;
-
-        typeSelect.value = this.getAttribute('type') || 'all';
-        genSelect.value = this.getAttribute('gen') || 'all';
-    }
-
-    private render() {
+    private renderLayout() {
         const currentType = this.getAttribute('type') || 'all';
         const currentGen = this.getAttribute('gen') || 'all';
 
@@ -71,30 +62,51 @@ export class AppFilter extends HTMLElement {
             <div class="filter-group" style="display:flex; gap:10px;">
                 <select id="type-filter" class="filter-select">
                     <option value="all" ${currentType === 'all' ? 'selected' : ''}>${I18n.t('filter_type')}</option>
-                    ${this._types.map(t => `
-                        <option value="${t}" ${currentType === t ? 'selected' : ''}>
-                            ${I18n.translateType(t)}
-                        </option>`).join('')}
+                    ${this.buildTypeOptionsHTML(currentType)}
                 </select>
                 
                 <select id="gen-filter" class="filter-select">
                     <option value="all" ${currentGen === 'all' ? 'selected' : ''}>${I18n.t('all_gen')}</option>
-                    ${this._gens.map(g => `
-                        <option value="${g}" ${currentGen === g ? 'selected' : ''}>
-                            Gen ${g}
-                        </option>`).join('')}
+                    ${this.buildGenOptionsHTML(currentGen)}
                 </select>
             </div>
         `;
     }
 
-    private attachEvents() {
-        const typeSelect = this.querySelector('#type-filter');
-        const genSelect = this.querySelector('#gen-filter');
+    private buildTypeOptionsHTML(currentType: string): string {
+        return this.availableTypes.map(t => `
+            <option value="${t}" ${currentType === t ? 'selected' : ''}>
+                ${I18n.translateType(t)}
+            </option>
+        `).join('');
+    }
+
+    private buildGenOptionsHTML(currentGen: string): string {
+        return this.availableGens.map(g => `
+            <option value="${g}" ${currentGen === g ? 'selected' : ''}>
+                Gen ${g}
+            </option>
+        `).join('');
+    }
+
+    private syncSelectsWithAttributes() {
+        const typeSelect = this.querySelector('#type-filter') as HTMLSelectElement;
+        const genSelect = this.querySelector('#gen-filter') as HTMLSelectElement;
+
+        if (typeSelect) typeSelect.value = this.getAttribute('type') || 'all';
+        if (genSelect) genSelect.value = this.getAttribute('gen') || 'all';
+    }
+    // #endregion
+
+    // #region INTERACTIONS
+    // ============================================================================
+    private bindEvents() {
+        const typeSelect = this.querySelector('#type-filter') as HTMLSelectElement;
+        const genSelect = this.querySelector('#gen-filter') as HTMLSelectElement;
 
         const handleChange = () => {
-            const typeVal = (typeSelect as HTMLSelectElement).value;
-            const genVal = (genSelect as HTMLSelectElement).value;
+            const typeVal = typeSelect.value;
+            const genVal = genSelect.value;
 
             this.setAttribute('type', typeVal);
             this.setAttribute('gen', genVal);

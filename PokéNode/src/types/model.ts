@@ -1,4 +1,5 @@
-// Types de base
+// #region TYPES DE BASE
+// ============================================================================
 export type PokemonType =
     | 'normal' | 'fire' | 'water' | 'grass' | 'electric' | 'ice'
     | 'fighting' | 'poison' | 'ground' | 'flying' | 'psychic' | 'bug'
@@ -6,8 +7,10 @@ export type PokemonType =
 
 export type ImageMode = 'artwork' | 'legacy';
 export type Language = 'fr' | 'en';
+// #endregion
 
-// Structures de données
+// #region STRUCTURES PARTAGÉES
+// ============================================================================
 export interface Stats {
     hp: number;
     attack: number;
@@ -21,24 +24,25 @@ export interface EvolutionNode {
     name: string;
     id: number;
     image: string;
-    evolvesTo: EvolutionNode[]; // Structure récursive
+    evolvesTo: EvolutionNode[];
 }
+// #endregion
 
-// Modèle léger (Listes, Recherche, TeamBuilder)
+// #region MODÈLES POKÉDEX (LITE & FULL)
+// ============================================================================
 export interface PokemonLite {
     id: number;
     name: string;
-    nameEn?: string;      // Pour la recherche bilingue
-    url: string;          // Pour charger les détails plus tard
-    types: PokemonType[]; // Pour le calcul des faiblesses
-    sprite?: string;      // Miniature pixel art
+    nameEn?: string;
+    url: string;
+    types: PokemonType[];
+    sprite?: string;
     abilities: {
         fr: string[];
         en: string[];
     };
 }
 
-// Modèle complet (Modale de détails)
 export interface Pokemon {
     id: number;
     name: { fr: string; en: string; };
@@ -64,23 +68,24 @@ export interface Pokemon {
         };
     };
 }
+// #endregion
 
-// TeamBuilder : Attaque
+// #region MODÈLES TEAM BUILDER
+// ============================================================================
 export interface MoveLite {
-    name: string;
+    name: { fr: string; en: string } | string;
     url: string;
-    type?: string;     // Rempli asynchrone
+    type?: string;     
     power?: number;
     accuracy?: number;
     pp?: number;
+    category?: 'physical' | 'special' | 'status'; 
+    description?: { fr: string; en: string };     
 }
 
-// TeamBuilder : Membre d'équipe
 export interface TeamMember extends PokemonLite {
-    // 4 attaques (Tuple fixe)
     selectedMoves: [MoveLite | null, MoveLite | null, MoveLite | null, MoveLite | null];
     
-    // Stats spécifiques au format compact
     stats?: {
         hp: number; 
         attack: number; 
@@ -91,13 +96,12 @@ export interface TeamMember extends PokemonLite {
     };
 }
 
-// TeamBuilder : Équipe complète
 export interface Team {
     id: string;
     name: string;
-    // 6 slots fixes (remplis ou null)
     members: [
         TeamMember | null, TeamMember | null, TeamMember | null, 
         TeamMember | null, TeamMember | null, TeamMember | null
     ];
 }
+// #endregion

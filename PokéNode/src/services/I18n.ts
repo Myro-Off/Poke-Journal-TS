@@ -1,11 +1,12 @@
 import type { Language } from '../types/model';
 
-// #region 1. SCHÉMA DE TRADUCTION (INTERFACES)
+// #region 1. SCHÉMA DE TRADUCTION
 // ============================================================================
 
 interface TranslationSchema {
     // --- POKEDEX GENERAL ---
     search_placeholder: string;
+    return_to_pokedex: string;
     loading: string;
     no_results: string;
     weight: string;
@@ -29,11 +30,17 @@ interface TranslationSchema {
     // --- TEAM BUILDER & CARNET ---
     team_title: string;
     team_title_single: string;
+    team_limit: string;
+    save_error: string;
     new_team: string;
     add_pokemon: string;
     empty_slot: string;
     tear_page: string;
     tear_confirm: string;
+    power: string;
+    accuracy: string;
+    pp: string;
+    category: string;
 
     // --- MINI DEX (RECRUTEMENT) ---
     recruit_title: string;
@@ -78,6 +85,7 @@ const dictionary: Record<Language, TranslationSchema> = {
     fr: {
         // Textes UI
         search_placeholder: "Rechercher (Nom, ID, Talent...)",
+        return_to_pokedex: "Retour au Pokédex",
         loading: "Chargement...",
         no_results: "Aucun Pokémon trouvé.",
         weight: "Poids",
@@ -108,20 +116,26 @@ const dictionary: Record<Language, TranslationSchema> = {
         empty_slot: "?",
         tear_page: "Arracher la page",
         tear_confirm: "Voulez-vous vraiment arracher cette page et perdre cette équipe ?",
+        team_limit: "Limite atteinte : 6 équipes maximum.",
+        save_error: "Erreur lors du chargement de la sauvegarde.",
 
         // Mini Dex
         recruit_title: "Recrutement",
-        search_placeholder_short: "Rechercher (Nom ou ID)...",
+        search_placeholder_short: "Rechercher (Nom ou ID)",
         close: "Fermer",
 
         // Battle Modal
         notebook_stats: "Statistiques",
-        notebook_moves: "Techniques (4 max)",
+        notebook_moves: "Techniques",
         notebook_empty_move: "Emplacement vide",
-        move_placeholder: "Chercher une technique...",
+        move_placeholder: "Chercher une technique",
         chose_move: "Choisir une Attaque",
-        weaknesses_label: "⚠️ Attention aux :",
+        weaknesses_label: "Équipe faible face aux types :",
         no_weakness: "Aucune faiblesse majeure.",
+        power: "Puissance",
+        accuracy: "Précision",
+        pp: "PP",
+        category: "Catégorie",
 
         // Abréviations
         hp_short: "PV",
@@ -153,6 +167,7 @@ const dictionary: Record<Language, TranslationSchema> = {
     en: {
         // UI Texts
         search_placeholder: "Search (Name, ID, Ability...)",
+        return_to_pokedex: "Return to Pokedex",
         loading: "Loading...",
         no_results: "No Pokemon found.",
         weight: "Weight",
@@ -183,20 +198,26 @@ const dictionary: Record<Language, TranslationSchema> = {
         empty_slot: "?",
         tear_page: "Tear page",
         tear_confirm: "Do you really want to tear this page and lose this team?",
+        team_limit: "Maximum limit reached: 6 teams.",
+        save_error: "Error loading save file.",
 
         // Mini Dex
         recruit_title: "Recruitment",
-        search_placeholder_short: "Search (Name or ID)...",
+        search_placeholder_short: "Search (Name or ID)",
         close: "Close",
 
         // Battle Modal
         notebook_stats: "Statistics",
-        notebook_moves: "Moves (Max 4)",
+        notebook_moves: "Moves",
         notebook_empty_move: "Empty Slot",
-        move_placeholder: "Search for a move...",
+        move_placeholder: "Search for a move",
         chose_move: "Chose a Move",
-        weaknesses_label: "⚠️ Watch out for:",
+        weaknesses_label: "Team weak against the types :",
         no_weakness: "No major weakness.",
+        power: "Power",
+        accuracy: "Accuracy",
+        pp: "PP",
+        category: "Category",
 
         // Abbreviations
         hp_short: "HP",

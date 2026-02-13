@@ -2,41 +2,47 @@ import { I18n } from '../../services/I18n';
 
 export class AppSearch extends HTMLElement {
 
-    // #region 1. Config & Attributes
-    static get observedAttributes() { return ['lang']; }
+    // #region CONFIGURATION & ATTRIBUTS
+    // ============================================================================
+    static get observedAttributes() { 
+        return ['lang']; 
+    }
+    
     public onSearch?: (text: string) => void;
     // #endregion
 
-    // #region 2. Lifecycle
+    // #region CYCLE DE VIE
+    // ============================================================================
     connectedCallback() {
-        if (!this.innerHTML.trim()) {
-            this.render();
-            this.bindEvents();
+        if (!this.hasChildNodes()) {
+            this.renderLayout();
+            this.attachListeners();
         }
     }
 
     attributeChangedCallback(name: string, prev: string, next: string) {
         if (name === 'lang' && prev !== next) {
-            const input = this.querySelector('input');
-            if (input) input.placeholder = I18n.t('search_placeholder');
+            this.updatePlaceholder();
         }
     }
     // #endregion
 
-    // #region 3. Public API
-    set value(val: string) {
-        const input = this.querySelector('input');
-        if (input) input.value = val;
+    // #region API PUBLIQUE
+    // ============================================================================
+    set value(text: string) {
+        const input = this.getInputField();
+        if (input) input.value = text;
     }
 
     get value(): string {
-        return this.querySelector('input')?.value || '';
+        return this.getInputField()?.value || '';
     }
     // #endregion
 
-    // #region 4. Rendering
-    private render() {
-        this.innerHTML = `
+    // #region RENDU
+    // ============================================================================
+    private renderLayout() {
+        this.innerHTML = /*html*/ `
             <div class="search-wrapper">
                 <input type="text" 
                        id="search-input-field" 
@@ -46,14 +52,32 @@ export class AppSearch extends HTMLElement {
             </div>
         `;
     }
+
+    private updatePlaceholder() {
+        const input = this.getInputField();
+        if (input) {
+            input.placeholder = I18n.t('search_placeholder');
+        }
+    }
     // #endregion
 
-    // #region 5. Events
-    private bindEvents() {
-        this.querySelector('input')?.addEventListener('input', (e) => {
-            const val = (e.target as HTMLInputElement).value.trim();
-            this.onSearch?.(val);
+    // #region INTERACTIONS
+    // ============================================================================
+    private attachListeners() {
+        this.getInputField()?.addEventListener('input', (e) => {
+            const target = e.target as HTMLInputElement;
+            this.triggerSearch(target.value);
         });
+    }
+
+    private triggerSearch(rawText: string) {
+        if (this.onSearch) {
+            this.onSearch(rawText.trim());
+        }
+    }
+
+    private getInputField(): HTMLInputElement | null {
+        return this.querySelector('input');
     }
     // #endregion
 }

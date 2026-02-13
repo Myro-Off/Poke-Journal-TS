@@ -1,13 +1,12 @@
 import type { Pokemon, PokemonType, EvolutionNode, PokemonLite, MoveLite } from '../types/model';
 import { I18n } from '../services/I18n';
 
-// #region 0. INTERFACES API (TYPAGE STRICT)
+// #region INTERFACES API (INTERNE)
 // ============================================================================
-
-// --- GraphQL Types ---
 interface GQLName { name: string; language_id: number; }
 interface GQLSpecies { id: number; name: string; pokemon_v2_pokemonspeciesnames: GQLName[]; }
 interface GQLAbility { id: number; name: string; pokemon_v2_abilitynames: GQLName[]; }
+interface GQLMove { name: string; pokemon_v2_movenames: GQLName[]; }
 interface GQLPokemonVariant {
     id: number;
     name: string;
@@ -16,14 +15,12 @@ interface GQLPokemonVariant {
     pokemon_v2_pokemonabilities: { pokemon_v2_ability: { id: number } }[];
 }
 
-// --- REST API Types ---
 interface ApiName { name: string; language: { name: string } }
 interface ApiFlavorText { flavor_text: string; language: { name: string } }
 interface ApiChainLink {
     species: { name: string; url: string };
     evolves_to: ApiChainLink[];
 }
-
 interface ApiEvolutionChain { chain: ApiChainLink }
 interface ApiPokemon {
     id: number;
@@ -40,14 +37,12 @@ interface ApiPokemon {
     };
     species: { url: string };
 }
-
 interface ApiSpecies {
     names: ApiName[];
     flavor_text_entries: ApiFlavorText[];
     generation: { name: string };
     evolution_chain: { url: string };
 }
-
 interface ApiMove {
     name: string;
     names: ApiName[];
@@ -55,115 +50,127 @@ interface ApiMove {
     power: number;
     accuracy: number;
     pp: number;
+    damage_class: { name: string };
+    flavor_text_entries: ApiFlavorText[];
 }
 // #endregion
 
-// #region 1. CONFIGURATION & CACHE
+// #region CONFIGURATION & CACHE
 // ============================================================================
 const BASE_URL = 'https://pokeapi.co/api/v2';
 const GRAPHQL_URL = 'https://beta.pokeapi.co/graphql/v1beta';
 
-// Cache mémoire
 const pokemonCache = new Map<number, Pokemon>();
 const typeCache = new Map<string, unknown>(); 
 const abilityCache = new Map<string, string>();
+const moveNameCache = new Map<string, { fr: string, en: string }>();
 
-// Cache pour la "Big List"
 let _globalLiteCache: PokemonLite[] = [];
 // #endregion
 
-export const PokemonAPI = {
+export class PokemonAPI {
 
-    // #region 2. GESTION DU CACHE
-    // ------------------------------------------------------------------------
-    getCachedPokemon(id: number): Pokemon | undefined {
+    // #region GESTION DU CACHE
+    // ============================================================================
+    static getCachedPokemon(id: number): Pokemon | undefined {
         return pokemonCache.get(id);
-    },
+    }
+
+    static getMoveName(technicalName: string): { fr: string, en: string } {
+        const cached = moveNameCache.get(technicalName);
+        if (cached) return cached;
+        const formatted = technicalName.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+        return { fr: formatted, en: formatted };
+    }
     // #endregion
 
-    // #region 3. RÉCUPÉRATION GLOBALE
-    // ------------------------------------------------------------------------
-
-    async getAllPokemonLite(): Promise<PokemonLite[]> {
+    // #region LISTING GLOBAL (POKÉDEX LITE)
+    // ============================================================================
+    static async getAllPokemonLite(): Promise<PokemonLite[]> {
         if (_globalLiteCache.length > 0) return _globalLiteCache;
 
         try {
-            const [speciesMap, abilitiesMap] = await Promise.all([
+            const [speciesMap, abilitiesMap, _] = await Promise.all([
                 this.fetchAllSpeciesNames(),
-                this.fetchAllAbilityNames()
+                this.fetchAllAbilityNames(),
+                this.fetchAllMoveNames()
             ]);
 
-            const pokemons = await this.fetchAllPokemonVariants();
+            const variants = await this.fetchAllPokemonVariants();
 
-            _globalLiteCache = pokemons.map((p: GQLPokemonVariant) => {
-                const speciesId = p.pokemon_species_id;
-
-                // --- A. TRAITEMENT DU NOM ---
-                let techName = p.name || "unknown";
-                techName = techName.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
-
-                const speciesNameFr = speciesMap.get(speciesId) || techName;
-                let finalNameFr = speciesNameFr;
-
-                // Logique variants
-                if (!techName.toLowerCase().includes(speciesNameFr.toLowerCase()) && p.name.includes('-')) {
-                    const rawName = p.name;
-                    if (rawName.includes('-mega-x')) finalNameFr = `Méga-${speciesNameFr} X`;
-                    else if (rawName.includes('-mega-y')) finalNameFr = `Méga-${speciesNameFr} Y`;
-                    else if (rawName.includes('-mega')) finalNameFr = `Méga-${speciesNameFr}`;
-                    else if (rawName.includes('-gmax')) finalNameFr = `${speciesNameFr} Gigamax`;
-                    else if (rawName.includes('-alola')) finalNameFr = `${speciesNameFr} d'Alola`;
-                    else if (rawName.includes('-galar')) finalNameFr = `${speciesNameFr} de Galar`;
-                    else if (rawName.includes('-hisui')) finalNameFr = `${speciesNameFr} d'Hisui`;
-                    else if (rawName.includes('-paldea')) finalNameFr = `${speciesNameFr} de Paldea`;
-                    else if (rawName.includes('-primal')) finalNameFr = `Primo-${speciesNameFr}`;
-                }
-                finalNameFr = finalNameFr.charAt(0).toUpperCase() + finalNameFr.slice(1);
-
-                // --- B. TRAITEMENT DES TYPES ---
-                const types = p.pokemon_v2_pokemontypes.map(t => t.pokemon_v2_type.name);
-
-                // --- C. TRAITEMENT DES TALENTS ---
-                const pokemonAbilityIds = p.pokemon_v2_pokemonabilities.map(pa => pa.pokemon_v2_ability.id);
-                
-                const abilitiesFr: string[] = [];
-                const abilitiesEn: string[] = [];
-
-                pokemonAbilityIds.forEach((id) => {
-                    const names = abilitiesMap.get(id);
-                    if (names) {
-                        if (names.fr) abilitiesFr.push(names.fr);
-                        if (names.en) abilitiesEn.push(names.en);
-                    }
-                });
-
-                return {
-                    id: p.id,
-                    name: finalNameFr,
-                    nameEn: techName,
-                    url: `${BASE_URL}/pokemon/${p.id}/`,
-                    types: types as PokemonType[],
-                    abilities: { fr: abilitiesFr, en: abilitiesEn }
-                };
-            });
-
+            _globalLiteCache = variants.map((v) => this.mapVariantToLite(v, speciesMap, abilitiesMap));
             return _globalLiteCache;
 
         } catch (e) {
             console.warn("⚠️ Échec stratégie Split Query, passage en mode secours (REST).", e);
             return this.getAllPokemonLiteFallback();
         }
-    },
+    }
 
-    async fetchAllSpeciesNames(): Promise<Map<number, string>> {
+    private static mapVariantToLite(
+        p: GQLPokemonVariant, 
+        speciesMap: Map<number, string>, 
+        abilitiesMap: Map<number, { fr: string, en: string }>
+    ): PokemonLite {
+        const speciesNameFr = speciesMap.get(p.pokemon_species_id) || p.name;
+        
+        const techName = p.name.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+        
+        const finalNameFr = this.formatVariantName(p.name, speciesNameFr);
+
+        const types = p.pokemon_v2_pokemontypes.map(t => t.pokemon_v2_type.name);
+
+        const abilitiesFr: string[] = [];
+        const abilitiesEn: string[] = [];
+
+        p.pokemon_v2_pokemonabilities.forEach(pa => {
+            const names = abilitiesMap.get(pa.pokemon_v2_ability.id);
+            if (names) {
+                if (names.fr) abilitiesFr.push(names.fr);
+                if (names.en) abilitiesEn.push(names.en);
+            }
+        });
+
+        return {
+            id: p.id,
+            name: finalNameFr,
+            nameEn: techName,
+            url: `${BASE_URL}/pokemon/${p.id}/`,
+            types: types as PokemonType[],
+            abilities: { fr: abilitiesFr, en: abilitiesEn }
+        };
+    }
+
+    private static formatVariantName(rawName: string, speciesNameFr: string): string {
+        let finalName = speciesNameFr;
+        const lowerRaw = rawName.toLowerCase();
+        const lowerSpecies = speciesNameFr.toLowerCase();
+
+        if (!lowerRaw.includes(lowerSpecies) && rawName.includes('-')) {
+            if (rawName.includes('-mega-x')) finalName = `Méga-${speciesNameFr} X`;
+            else if (rawName.includes('-mega-y')) finalName = `Méga-${speciesNameFr} Y`;
+            else if (rawName.includes('-mega')) finalName = `Méga-${speciesNameFr}`;
+            else if (rawName.includes('-gmax')) finalName = `${speciesNameFr} Gigamax`;
+            else if (rawName.includes('-alola')) finalName = `${speciesNameFr} d'Alola`;
+            else if (rawName.includes('-galar')) finalName = `${speciesNameFr} de Galar`;
+            else if (rawName.includes('-hisui')) finalName = `${speciesNameFr} d'Hisui`;
+            else if (rawName.includes('-paldea')) finalName = `${speciesNameFr} de Paldea`;
+            else if (rawName.includes('-primal')) finalName = `Primo-${speciesNameFr}`;
+        }
+        
+        return finalName.charAt(0).toUpperCase() + finalName.slice(1);
+    }
+    // #endregion
+
+    // #region REQUÊTES GRAPHQL (HELPERS)
+    // ============================================================================
+    static async fetchAllSpeciesNames(): Promise<Map<number, string>> {
         const query = `query { pokemon_v2_pokemonspecies(order_by: {id: asc}) { id name pokemon_v2_pokemonspeciesnames(where: {language_id: {_eq: 5}}) { name } } }`;
         try {
             const res = await fetch(GRAPHQL_URL, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({query}) });
             const json = await res.json();
             const map = new Map<number, string>();
-            
             if (json.data?.pokemon_v2_pokemonspecies) {
-                // Typage explicite de 's' via l'interface GQLSpecies
                 json.data.pokemon_v2_pokemonspecies.forEach((s: GQLSpecies) => {
                     const name = s.pokemon_v2_pokemonspeciesnames[0]?.name || s.name;
                     map.set(s.id, name);
@@ -171,32 +178,17 @@ export const PokemonAPI = {
             }
             return map;
         } catch { return new Map(); }
-    },
+    }
 
-    async fetchAllAbilityNames(): Promise<Map<number, { fr: string, en: string }>> {
-        const query = `
-            query {
-                pokemon_v2_ability {
-                    id
-                    name
-                    pokemon_v2_abilitynames(where: {language_id: {_in: [5, 9]}}) {
-                        name
-                        language_id
-                    }
-                }
-            }
-        `;
-
+    static async fetchAllAbilityNames(): Promise<Map<number, { fr: string, en: string }>> {
+        const query = `query { pokemon_v2_ability { id name pokemon_v2_abilitynames(where: {language_id: {_in: [5, 9]}}) { name language_id } } }`;
         try {
             const res = await fetch(GRAPHQL_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query }) });
             const json = await res.json();
             const map = new Map<number, { fr: string, en: string }>();
-
             if (json.data?.pokemon_v2_ability) {
                 json.data.pokemon_v2_ability.forEach((a: GQLAbility) => {
-                    let fr = a.name;
-                    let en = a.name;
-
+                    let fr = a.name; let en = a.name;
                     a.pokemon_v2_abilitynames.forEach((n) => {
                         if (n.language_id === 5) fr = n.name;
                         if (n.language_id === 9) en = n.name;
@@ -205,44 +197,42 @@ export const PokemonAPI = {
                 });
             }
             return map;
-        } catch (e) {
-            console.error("❌ Erreur GraphQL Abilities", e);
-            return new Map();
-        }
-    },
+        } catch { return new Map(); }
+    }
 
-    async fetchAllPokemonVariants(): Promise<GQLPokemonVariant[]> {
-        const query = `
-            query {
-                pokemon_v2_pokemon(order_by: {id: asc}) {
-                    id
-                    name
-                    pokemon_species_id
-                    pokemon_v2_pokemontypes {
-                        pokemon_v2_type {
-                            name
-                        }
+    static async fetchAllMoveNames(): Promise<void> {
+        const query = `query { pokemon_v2_move { name pokemon_v2_movenames(where: {language_id: {_in: [5, 9]}}) { name language_id } } }`;
+        try {
+            const res = await fetch(GRAPHQL_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query }) });
+            const json = await res.json();
+            if (json.data?.pokemon_v2_move) {
+                json.data.pokemon_v2_move.forEach((m: GQLMove) => {
+                    let fr = m.name; let en = m.name;
+                    m.pokemon_v2_movenames.forEach((n) => {
+                        if (n.language_id === 5) fr = n.name;
+                        if (n.language_id === 9) en = n.name;
+                    });
+                    if (en === m.name) {
+                        en = en.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
                     }
-                    pokemon_v2_pokemonabilities {
-                        pokemon_v2_ability {
-                            id
-                        }
-                    }
-                }
+                    moveNameCache.set(m.name, { fr, en });
+                });
             }
-        `;
+        } catch (e) { console.error("Erreur Move Names", e); }
+    }
+
+    static async fetchAllPokemonVariants(): Promise<GQLPokemonVariant[]> {
+        const query = `query { pokemon_v2_pokemon(order_by: {id: asc}) { id name pokemon_species_id pokemon_v2_pokemontypes { pokemon_v2_type { name } } pokemon_v2_pokemonabilities { pokemon_v2_ability { id } } } }`;
         try {
             const res = await fetch(GRAPHQL_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query }) });
             const json = await res.json();
             return (json.data?.pokemon_v2_pokemon as GQLPokemonVariant[]) || [];
         } catch { return []; }
-    },
+    }
 
-    async getAllPokemonLiteFallback(): Promise<PokemonLite[]> {
+    static async getAllPokemonLiteFallback(): Promise<PokemonLite[]> {
         const response = await fetch(`${BASE_URL}/pokemon?limit=2000`);
         const data = await response.json();
-        
-        // Typage du résultat brut de "results"
         return data.results.map((p: { name: string; url: string }) => {
             const id = Number(p.url.split('/').slice(-2, -1)[0]);
             return {
@@ -254,38 +244,29 @@ export const PokemonAPI = {
                 abilities: { fr: [], en: [] }
             };
         });
-    },
+    }
     // #endregion
 
-    // #region 4. DÉTAILS COMPLETS (MODALE)
-    // ------------------------------------------------------------------------
-    async getPokemonDetails(id: number): Promise<Pokemon> {
+    // #region DÉTAILS POKÉMON (FULL)
+    // ============================================================================
+    static async getPokemonDetails(id: number): Promise<Pokemon> {
         if (pokemonCache.has(id)) return pokemonCache.get(id)!;
 
         const pokemonRes = await fetch(`${BASE_URL}/pokemon/${id}`);
         if (!pokemonRes.ok) throw new Error(`Pokemon ${id} not found`);
-        const data = await pokemonRes.json() as ApiPokemon; // Cast vers Interface
+        const data = await pokemonRes.json() as ApiPokemon; 
 
         const speciesRes = await fetch(data.species.url);
-        const speciesData = await speciesRes.json() as ApiSpecies; // Cast vers Interface
+        const speciesData = await speciesRes.json() as ApiSpecies; 
 
-        // Noms
-        let nameFr = speciesData.names.find(n => n.language.name === 'fr')?.name || data.name;
-        const technicalName = data.name.toLowerCase();
-
-        if (technicalName.includes('-mega-x')) nameFr = `Méga-${nameFr} X`;
-        else if (technicalName.includes('-mega-y')) nameFr = `Méga-${nameFr} Y`;
-        else if (technicalName.includes('-mega')) nameFr = `Méga-${nameFr}`;
-        else if (technicalName.includes('-gmax')) nameFr = `${nameFr} Gigamax`;
-        else if (technicalName.includes('-alola')) nameFr = `${nameFr} d'Alola`;
-        else if (technicalName.includes('-galar')) nameFr = `${nameFr} de Galar`;
-        else if (technicalName.includes('-hisui')) nameFr = `${nameFr} d'Hisui`;
-        else if (technicalName.includes('-paldea')) nameFr = `${nameFr} de Paldea`;
-        else if (technicalName.includes('-primal')) nameFr = `${nameFr} Primo`;
-
-        let nameEn = data.name.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+        const baseNameFr = speciesData.names.find(n => n.language.name === 'fr')?.name || data.name;
+        const nameFr = this.formatVariantName(data.name, baseNameFr);
+        const nameEn = data.name.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
         
-        const getDesc = (lang: string) => speciesData.flavor_text_entries.find(f => f.language.name === lang)?.flavor_text?.replaceAll(/[\n\f]/g, ' ') || "Description non disponible.";
+        const getDesc = (lang: string) => 
+            speciesData.flavor_text_entries
+                .find(f => f.language.name === lang)?.flavor_text?.replaceAll(/[\n\f]/g, ' ') 
+                || "Description non disponible.";
 
         const pokemonFull: Pokemon = {
             id: data.id,
@@ -315,44 +296,62 @@ export const PokemonAPI = {
 
         pokemonCache.set(id, pokemonFull);
         return pokemonFull;
-    },
+    }
     // #endregion
 
-    // #region 5. UTILITAIRES DIVERS
-    // ------------------------------------------------------------------------
-    
-    async getMoveDetails(url: string): Promise<MoveLite> {
+    // #region DÉTAILS TECHNIQUES (MOVES, ABILITIES, TYPES)
+    // ============================================================================
+    static async getMoveDetails(url: string): Promise<MoveLite> {
         try {
             const res = await fetch(url);
             const data = await res.json() as ApiMove;
-            const nameFr = data.names.find(n => n.language.name === 'fr')?.name || data.name;
+            
+            const nameFr = data.names.find(n => n.language.name === 'fr')?.name || this.getMoveName(data.name).fr;
+            const nameEn = data.names.find(n => n.language.name === 'en')?.name || this.getMoveName(data.name).en;
+
+            const getDesc = (lang: string) => {
+                const entry = data.flavor_text_entries.find(f => f.language.name === lang);
+                if (!entry && lang !== 'en') {
+                    return data.flavor_text_entries.find(f => f.language.name === 'en')?.flavor_text?.replace(/[\n\f]/g, ' ') || "No description.";
+                }
+                return entry?.flavor_text?.replace(/[\n\f]/g, ' ') || "Aucune description.";
+            };
+
             return {
-                name: nameFr,
+                name: { fr: nameFr, en: nameEn },
                 url: url,
                 type: data.type.name,
                 power: data.power,
                 accuracy: data.accuracy,
-                pp: data.pp
+                pp: data.pp,
+                category: data.damage_class?.name as 'physical' | 'special' | 'status',
+                description: {
+                    fr: getDesc('fr'),
+                    en: getDesc('en')
+                }
             };
-        } catch { return { name: "Erreur", url: url }; }
-    },
+        } catch (e) { 
+            console.error("Erreur Move Details", e);
+            return { name: "Erreur", url: url }; 
+        }
+    }
 
-    async getAbilityTranslation(abilityName: string, lang: 'fr' | 'en'): Promise<string> {
+    static async getAbilityTranslation(abilityName: string, lang: 'fr' | 'en'): Promise<string> {
         const cacheKey = `${abilityName}-${lang}`;
         if (abilityCache.has(cacheKey)) return abilityCache.get(cacheKey)!;
+        
         try {
             const res = await fetch(`${BASE_URL}/ability/${abilityName}`);
-            // TODO : faire les détails de abilities
             const data = await res.json() as { names: ApiName[], name: string };
-            
             const translation = data.names.find(n => n.language.name === lang);
             const result = translation ? translation.name : abilityName;
+            
             abilityCache.set(cacheKey, result);
             return result;
         } catch { return abilityName; }
-    },
+    }
 
-    async getTypeRelations(type: string): Promise<any>{
+    static async getTypeRelations(type: string): Promise<any>{
         if (typeCache.has(type)) return typeCache.get(type);
         try {
             const res = await fetch(`${BASE_URL}/type/${type}`);
@@ -360,13 +359,17 @@ export const PokemonAPI = {
             typeCache.set(type, data.damage_relations);
             return data.damage_relations;
         } catch { return null; }
-    },
+    }
+    // #endregion
 
-    async getEvolutionChain(url: string): Promise<EvolutionNode> {
+    // #region ÉVOLUTIONS
+    // ============================================================================
+    static async getEvolutionChain(url: string): Promise<EvolutionNode> {
         if (!url) throw new Error("URL manquante");
+        
         const response = await fetch(url);
         const data = await response.json() as ApiEvolutionChain;
-
+        
         const buildChain = (chainData: ApiChainLink): EvolutionNode => {
             const id = Number(chainData.species.url.split('/').slice(-2, -1)[0]);
             return {
@@ -376,35 +379,43 @@ export const PokemonAPI = {
                 evolvesTo: chainData.evolves_to.map((evo) => buildChain(evo))
             };
         };
+        
         return buildChain(data.chain);
-    },
+    }
+    // #endregion
 
-    async getTypesList(): Promise<string[]> {
+    // #region LISTES & FILTRES
+    // ============================================================================
+    static async getTypesList(): Promise<string[]> {
         try {
             const res = await fetch(`${BASE_URL}/type`);
             const data = await res.json();
             return data.results
                 .map((t: { name: string }) => t.name)
                 .filter((t: string) => !['unknown', 'shadow', 'stellar'].includes(t));
-        } catch { return ['normal', 'fire', 'water', 'grass']; }
-    },
+        } catch { 
+            return ['normal', 'fire', 'water', 'grass']; 
+        }
+    }
 
-    async getGenerationsList(): Promise<string[]> {
+    static async getGenerationsList(): Promise<string[]> {
         try {
             const res = await fetch(`${BASE_URL}/generation`);
             const data = await res.json();
             return data.results.map((g: { name: string }) => g.name.split('-')[1].toUpperCase());
-        } catch { return ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX']; }
-    },
+        } catch { 
+            return ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX']; 
+        }
+    }
 
-    async getIdsByType(type: string): Promise<number[]> {
+    static async getIdsByType(type: string): Promise<number[]> {
         if (type === 'all') return [];
         const res = await fetch(`${BASE_URL}/type/${type}`);
         const data = await res.json();
         return data.pokemon.map((p: { pokemon: { url: string } }) => Number(p.pokemon.url.split('/').slice(-2, -1)[0]));
-    },
+    }
 
-    async getIdsByGen(gen: string): Promise<number[]> {
+    static async getIdsByGen(gen: string): Promise<number[]> {
         if (gen === 'all') return [];
         let query = gen.toLowerCase().startsWith('generation-') ? gen.toLowerCase() : `generation-${gen.toLowerCase()}`;
         const res = await fetch(`${BASE_URL}/generation/${query}`);
@@ -412,4 +423,4 @@ export const PokemonAPI = {
         return data.pokemon_species.map((p: { url: string }) => Number(p.url.split('/').slice(-2, -1)[0]));
     }
     // #endregion
-};
+}

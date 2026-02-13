@@ -15,62 +15,27 @@ export class AppHeader extends HTMLElement {
     // #region CYCLE DE VIE
     // ============================================================================
     connectedCallback() {
-        if (!this.innerHTML.trim()) {
-            this.render();
-            this.attachEvents();
+        if (!this.hasChildNodes()) {
+            this.renderLayout();
+            this.attachEventListeners();
         }
-        this.updateCheckboxesFromAttributes();
-    }
-
-    attributeChangedCallback(oldValue: string, newValue: string) {
-        if (oldValue !== newValue) {
-            this.updateCheckboxesFromAttributes();
-        }
+        
+        this.synchronizeStateWithUI();
+        this.listenToGlobalSettings();
     }
     // #endregion
 
-    // #region API PUBLIQUE (NAVIGATION)
+    // #region API PUBLIQUE
     // ============================================================================
     public setViewMode(mode: 'pokedex' | 'builder') {
         this.currentView = mode;
-        const btn = this.querySelector('#open-team-builder');
-        if (!btn) return;
-
-        const iconSpan = btn.querySelector('.icon');
-        const labelSpan = btn.querySelector('.label');
-
-        if (mode === 'pokedex') {
-            if (iconSpan) iconSpan.textContent = '📜';
-            if (labelSpan) labelSpan.textContent = 'Équipes';
-            btn.classList.remove('active-mode');
-            btn.setAttribute('title', 'Gérer mes équipes');
-        } else {
-            if (iconSpan) {
-                iconSpan.innerHTML = `<img src="https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/items/poke-ball.png" 
-                    style="width:20px; height:20px; vertical-align:middle; filter: drop-shadow(0 2px 2px rgba(0,0,0,0.5));">`;
-            }
-            if (labelSpan) labelSpan.textContent = 'Pokédex';
-            btn.classList.add('active-mode');
-            btn.setAttribute('title', 'Retour au Pokédex');
-        }
+        this.updateNavigationButtonState(mode);
     }
     // #endregion
 
-    // #region LOGIQUE INTERNE & RENDU
+    // #region RENDU
     // ============================================================================
-    private updateCheckboxesFromAttributes() {
-        const langInput = this.querySelector('#header-toggle-lang') as HTMLInputElement;
-        const modeInput = this.querySelector('#header-toggle-mode') as HTMLInputElement;
-        if (!langInput || !modeInput) return;
-
-        const currentLang = this.getAttribute('lang') || 'fr';
-        const currentMode = this.getAttribute('mode') || 'artwork';
-
-        langInput.checked = (currentLang === 'en');
-        modeInput.checked = (currentMode === 'legacy');
-    }
-
-    private render() {
+    private renderLayout() {
         const lang = this.getAttribute('lang') || 'fr';
         const mode = this.getAttribute('mode') || 'artwork';
 
@@ -86,47 +51,103 @@ export class AppHeader extends HTMLElement {
                 </div>
 
                 <div class="header-settings">
-                    <button id="open-team-builder" class="action-pill-btn" title="Gérer mes équipes">
-                        <span class="icon">📜</span> 
-                        <span class="label">Équipes</span>
-                    </button>
-
-                    <div class="switch-container">
-                        <label class="poke-switch">
-                            <input type="checkbox" id="header-toggle-lang" ${lang === 'en' ? 'checked' : ''}>
-                            <span class="poke-slider"></span>
-                            <span class="switch-label">FR</span>
-                            <span class="switch-label">EN</span>
-                        </label>
-                    </div>
-
-                    <div class="switch-container">
-                        <label class="poke-switch">
-                            <input type="checkbox" id="header-toggle-mode" ${mode === 'legacy' ? 'checked' : ''}>
-                            <span class="poke-slider"></span>
-                            <span class="switch-label">HD</span>
-                            <span class="switch-label">Pix</span>
-                        </label>
-                    </div>
+                    ${this.buildNavigationButtonHTML()}
+                    ${this.buildLangSwitchHTML(lang === 'en')}
+                    ${this.buildModeSwitchHTML(mode === 'legacy')}
                 </div>
+            </div>
+        `;
+    }
+
+    private buildNavigationButtonHTML(): string {
+        return /*html*/ `
+            <button id="open-team-builder" class="action-pill-btn" title="Gérer mes équipes">
+                <span class="icon">📜</span> 
+                <span class="label">Équipes</span>
+            </button>
+        `;
+    }
+
+    private buildLangSwitchHTML(isEnglish: boolean): string {
+        return /*html*/ `
+            <div class="switch-container">
+                <label class="poke-switch">
+                    <input type="checkbox" id="header-toggle-lang" ${isEnglish ? 'checked' : ''}>
+                    <span class="poke-slider"></span>
+                    <span class="switch-label">FR</span>
+                    <span class="switch-label">EN</span>
+                </label>
+            </div>
+        `;
+    }
+
+    private buildModeSwitchHTML(isLegacy: boolean): string {
+        return /*html*/ `
+            <div class="switch-container">
+                <label class="poke-switch">
+                    <input type="checkbox" id="header-toggle-mode" ${isLegacy ? 'checked' : ''}>
+                    <span class="poke-slider"></span>
+                    <span class="switch-label">HD</span>
+                    <span class="switch-label">Pix</span>
+                </label>
             </div>
         `;
     }
     // #endregion
 
-    // #region GESTION DES ÉVÉNEMENTS
+    // #region LOGIQUE UI & ÉTAT
     // ============================================================================
-    private attachEvents() {
-        const langInput = this.querySelector('#header-toggle-lang');
-        const modeInput = this.querySelector('#header-toggle-mode');
-        const actionBtn = this.querySelector('#open-team-builder');
+    private synchronizeStateWithUI() {
+        const langInput = this.querySelector('#header-toggle-lang') as HTMLInputElement;
+        const modeInput = this.querySelector('#header-toggle-mode') as HTMLInputElement;
+        
+        if (!langInput || !modeInput) return;
+
+        const currentLang = this.getAttribute('lang') || 'fr';
+        const currentMode = this.getAttribute('mode') || 'artwork';
+
+        langInput.checked = (currentLang === 'en');
+        modeInput.checked = (currentMode === 'legacy');
+    }
+
+    private updateNavigationButtonState(mode: 'pokedex' | 'builder') {
+        const btn = this.querySelector('#open-team-builder');
+        if (!btn) return;
+
+        const iconSpan = btn.querySelector('.icon');
+        const labelSpan = btn.querySelector('.label');
+
+        if (mode === 'pokedex') {
+            if (iconSpan) iconSpan.textContent = '📜';
+            if (labelSpan) labelSpan.textContent = 'Équipes';
+            btn.classList.remove('active-mode');
+            btn.setAttribute('title', 'Gérer mes équipes');
+        } else {
+            if (iconSpan) {
+                iconSpan.innerHTML = /*html*/ `<img src="https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/items/poke-ball.png" 
+                    style="width:20px; height:20px; vertical-align:middle; filter: drop-shadow(0 2px 2px rgba(0,0,0,0.5));">`;
+            }
+            if (labelSpan) labelSpan.textContent = 'Pokédex';
+            btn.classList.add('active-mode');
+            btn.setAttribute('title', 'Retour au Pokédex');
+        }
+    }
+    // #endregion
+
+    // #region INTERACTIONS
+    // ============================================================================
+    private attachEventListeners() {
+        this.bindSettingsChange();
+        this.bindNavigationClick();
+    }
+
+    private bindSettingsChange() {
+        const langInput = this.querySelector('#header-toggle-lang') as HTMLInputElement;
+        const modeInput = this.querySelector('#header-toggle-mode') as HTMLInputElement;
 
         const notifyChange = () => {
-            const isEn = (langInput as HTMLInputElement).checked;
-            const isLegacy = (modeInput as HTMLInputElement).checked;
-
-            const newLang: Language = isEn ? 'en' : 'fr';
-            const newMode: ImageMode = isLegacy ? 'legacy' : 'artwork';
+            const newLang: Language = langInput.checked ? 'en' : 'fr';
+            const newMode: ImageMode = modeInput.checked ? 'legacy' : 'artwork';
 
             this.setAttribute('lang', newLang);
             this.setAttribute('mode', newMode);
@@ -138,13 +159,26 @@ export class AppHeader extends HTMLElement {
 
         langInput?.addEventListener('change', notifyChange);
         modeInput?.addEventListener('change', notifyChange);
+    }
 
-        actionBtn?.addEventListener('click', () => {
+    private bindNavigationClick() {
+        this.querySelector('#open-team-builder')?.addEventListener('click', () => {
             const eventName = this.currentView === 'pokedex' ? 'open-teams' : 'navigate-home';
             this.dispatchEvent(new CustomEvent(eventName, {
                 bubbles: true,
                 composed: true
             }));
+        });
+    }
+
+    private listenToGlobalSettings() {
+        globalThis.addEventListener('settings:changed', (e: Event) => {
+            const evt = e as CustomEvent<{ mode: ImageMode, lang: Language }>;
+            
+            this.setAttribute('lang', evt.detail.lang);
+            this.setAttribute('mode', evt.detail.mode);
+
+            this.synchronizeStateWithUI();
         });
     }
     // #endregion

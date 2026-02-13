@@ -4,7 +4,7 @@ import { I18n } from '../../services/I18n';
 
 export class PokeCard extends HTMLElement {
 
-    // #region CONFIG & ETAT
+    // #region CONFIGURATION & ÉTAT
     // ============================================================================
     static get observedAttributes() {
         return ['mode'];
@@ -16,26 +16,27 @@ export class PokeCard extends HTMLElement {
     // #region CYCLE DE VIE
     // ============================================================================
     connectedCallback() {
-        if (this._pokemon) {
-            this.render();
-        }
+        this.renderLayout();
     }
 
     attributeChangedCallback(name: string, prev: string, next: string) {
-        if (name === 'mode' && prev !== next && this._pokemon) {
-            this.render();
+        if (name === 'mode' && prev !== next) {
+            this.renderLayout();
         }
     }
     // #endregion
 
     // #region API PUBLIQUE
     // ============================================================================
-    set pokemon(data: Pokemon | PokemonLite) {
+    set pokemon(data: Pokemon | PokemonLite | null) {
         this._pokemon = data;
-        this.dataset.id = data.id.toString();
-
+        
+        if (data) {
+            this.dataset.id = data.id.toString();
+        }
+        
         if (this.isConnected) {
-            this.render();
+            this.renderLayout();
         }
     }
 
@@ -44,61 +45,81 @@ export class PokeCard extends HTMLElement {
     }
     // #endregion
 
-    // #region RENDER
+    // #region RENDU
     // ============================================================================
-    private render() {
+    private renderLayout() {
         if (!this._pokemon) return;
 
         const mode = (this.getAttribute('mode') as ImageMode) || 'artwork';
-        const p = this._pokemon;
-        const hasFullData = 'types' in p;
-        const formattedId = p.id.toString().padStart(3, '0');
-        const rot = (p.id % 6) - 3;
+        this.innerHTML = this.buildCardHTML(this._pokemon, mode);
+        
+        this.bindImageErrorHandling(mode);
+    }
 
-        let displayName: string;
-        if (typeof p.name === 'string') {
-            displayName = p.name.charAt(0).toUpperCase() + p.name.slice(1);
-        } else {
-            displayName = I18n.getName(p.name);
-        }
+    private buildCardHTML(p: Pokemon | PokemonLite, mode: ImageMode): string {
+        const displayName = this.getDisplayName(p);
+        const formattedId = this.formatId(p.id);
+        const rotation = this.calculateRotation(p.id);
+        const imageUrl = MediaHandler.getCardImage(p, mode);
+        const pixelClass = mode === 'legacy' ? 'pixelated' : '';
+        
+        const typesHtml = this.buildTypesHTML(p);
+        const loadingClass = typesHtml ? '' : 'is-loading';
 
-        const imageUrl = MediaHandler.getCardImage(p as { id: number }, mode);
-        const placeholder = MediaHandler.getPlaceholder(mode);
-
-        const typesHtml = hasFullData
-            ? (p as Pokemon).types
-                .map(type => `<span class="card-type-badge type-${type}">${I18n.translateType(type)}</span>`)
-                .join('')
-            : '';
-
-        this.innerHTML = /*html*/ `
-            <div class="pokemon-card ${hasFullData ? '' : 'is-loading'}" 
-                 style="--rotation: ${rot}deg;">
+        return /*html*/ `
+            <div class="pokemon-card ${loadingClass}" style="--rotation: ${rotation}deg;">
                  
-                <div class="types-container">${typesHtml}</div>
+                <div class="types-container">
+                    ${typesHtml}
+                </div>
                 
                 <div class="img-container">
                     <img id="card-img"
                          src="${imageUrl}" 
                          alt="${displayName}" 
                          loading="lazy" 
-                         class="${mode === 'legacy' ? 'pixelated' : ''}">
+                         class="${pixelClass}">
                 </div>
                 
                 <div class="id-badge-card">#${formattedId}</div>
                 <h3>${displayName}</h3>
             </div>
         `;
-
-        this.attachErrorHandling(placeholder);
     }
 
-    private attachErrorHandling(placeholder: string) {
+    private buildTypesHTML(p: Pokemon | PokemonLite): string {
+        if ('types' in p && Array.isArray((p as Pokemon).types)) {
+            return (p as Pokemon).types
+                .map(type => /*html*/ `<span class="card-type-badge type-${type}">${I18n.translateType(type)}</span>`)
+                .join('');
+        }
+        return '';
+    }
+    // #endregion
+
+    // #region LOGIQUE D'AFFICHAGE & HELPERS
+    // ============================================================================
+    private getDisplayName(p: Pokemon | PokemonLite): string {
+        if (typeof p.name === 'string') {
+            return p.name.charAt(0).toUpperCase() + p.name.slice(1);
+        }
+        return I18n.getName(p.name);
+    }
+
+    private formatId(id: number): string {
+        return id.toString().padStart(3, '0');
+    }
+
+    private calculateRotation(id: number): number {
+        return (id % 6) - 3;
+    }
+
+    private bindImageErrorHandling(mode: ImageMode) {
         const img = this.querySelector('#card-img') as HTMLImageElement;
         if (img) {
             img.onerror = () => {
                 img.onerror = null; 
-                img.src = placeholder;
+                img.src = MediaHandler.getPlaceholder(mode);
             };
         }
     }

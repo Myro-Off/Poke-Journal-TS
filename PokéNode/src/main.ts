@@ -1,7 +1,12 @@
 import './assets/style.css';
 import { PokedexController } from './core/PokedexController';
-import { TeamService } from './services/TeamService';
 
-TeamService.init();
+// #region POINT D'ENTRÉE (MAIN)
+// ============================================================================
+document.addEventListener('DOMContentLoaded', () => {
+    
+    // Instanciation du Contrôleur Principal
+    new PokedexController();
 
-new PokedexController();
+});
+// #endregion
