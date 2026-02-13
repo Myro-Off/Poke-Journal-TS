@@ -6,10 +6,15 @@
   "scripts": {
     "dev": "node_modules/.bin/vite",
     "build": "node_modules/.bin/tsc && vite build",
-    "preview": "node_modules/.bin/vite preview"
+    "preview": "node_modules/.bin/vite preview",
+    "test": "vitest"
   },
   "devDependencies": {
+    "@types/bun": "^1.3.9",
+    "happy-dom": "^20.6.1",
+    "jsdom": "^28.0.0",
     "typescript": "~5.9.3",
-    "vite": "^7.2.4"
+    "vite": "^7.2.4",
+    "vitest": "^4.0.18"
   }
 }

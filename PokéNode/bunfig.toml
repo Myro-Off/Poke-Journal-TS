@@ -1,0 +1,3 @@
+[test]
+# On demande à Bun de charger l'environnement DOM globalement
+preload = ["./tests/setup.ts"]
